@@ -11,6 +11,7 @@ skill in that class lands. Do not dump new skills at the repo root.
 
 | Skill | Category | Purpose |
 |---|---|---|
+| [KSU — Keep Shit Updated](skills/devops/ksu/) | devops | Quiet nightly maintenance across enrolled Macs, Linux/VPS, Windows, and persistent sandboxes, with restart choices and bounded recovery. |
 | [proactive-skill-suggestor](skills/discovery/proactive-skill-suggestor/) | discovery | High-bar Skills Hub scout from recent Hermes work. Suggest-only. Upgrade similar local skills instead of installing duplicates. |
 | [gmail-triage](skills/email/gmail-triage/) | email | Portable Gmail triage, sender cleanup, unsubscribe, undo, and mailbox health through Composio-managed authentication. |
 
@@ -79,3 +80,7 @@ a private state directory, and its receipts store sender addresses, action class
 outcome classes, and Gmail filter IDs only — never bodies, subjects, unsubscribe
 URLs, tokens, or credentials. The only committed message data is the synthetic
 `fixtures/` set used by `selftest`.
+
+## KSU: nightly maintenance
+
+Point your agent at [KSU](skills/devops/ksu/SKILL.md) and ask it to enroll your machines. The default is 03:00 local time, app/service restarts allowed, full reboots deferred, and quiet local health reports. [Setup, coverage, and limitations](skills/devops/ksu/references/setup.md).
