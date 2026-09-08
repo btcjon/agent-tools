@@ -26,11 +26,17 @@ HARNESS_NAMES = {
     'hermes-agent': 'Hermes', 'opencode': 'OpenCode', 'opencode-ai': 'OpenCode',
     'aider-chat': 'Aider', 'aider': 'Aider', 'openclaw': 'OpenClaw',
     'goose': 'Goose', 'amp': 'Amp', '@sourcegraph/amp': 'Amp',
+    'codex-router': 'Codex Router', 'codex-model-router': 'Codex Router',
 }
 SKILL_ROOTS = ['.agents/skills', '.agents/exported-skills', '.codex/skills',
                '.claude/skills', '.cursor/skills', '.hermes/skills', '.gemini/skills',
                '.config/opencode/skills', '.pi/agent/skills']
 HARNESS_REPOS = ['.hermes/hermes-agent', '.hermes/hermes-agent-maintained', '.openclaw']
+CODEX_ROUTER_ORIGINS = (
+    'https://github.com/duolahypercho/codex-router',
+    'https://github.com/duolahypercho/codex-router.git',
+    'git@github.com:duolahypercho/codex-router.git',
+)
 SAFE_NAME = re.compile(r'^[A-Za-z0-9@][A-Za-z0-9@._+/:=-]*$')
 
 
@@ -140,10 +146,12 @@ class Probe:
         branch = ask('symbolic-ref', '--quiet', '--short', 'HEAD')
         origin = ask('config', '--get', 'remote.origin.url')
         status = ask('status', '--porcelain', '--untracked-files=normal')
+        tracked = ask('status', '--porcelain', '--untracked-files=no')
         upstream = ask('rev-parse', '--abbrev-ref', '@{upstream}') if branch else None
         head = ask('rev-parse', '--short', 'HEAD')
         data = dict(root=str(root), branch=(branch or '').strip(), origin=public_origin((origin or '').strip()),
-                    dirty=status != '', upstream=(upstream or '').strip(), head=(head or '').strip())
+                    dirty=status != '', tracked_dirty=tracked != '',
+                    upstream=(upstream or '').strip(), head=(head or '').strip())
         self.git_cache[str(root)] = data
         return data
 
@@ -290,15 +298,56 @@ def packages(probe):
     return list({r['id']: r for r in rows}.values())
 
 
+def recognized_codex_router_origin(origin):
+    return public_origin(origin or '') in {public_origin(url) for url in CODEX_ROUTER_ORIGINS}
+
+
+def codex_router_rows(probe):
+    path = probe.home / '.local/share/codex-router'
+    if not path.exists():
+        return []
+    repo = probe.git(path)
+    cli = path / 'bin' / 'codex-router'
+    manager = str(cli) if cli.is_file() and os.access(cli, os.X_OK) else ''
+    version = 'unknown'
+    pkg = path / 'package.json'
+    try:
+        if pkg.exists() and not offline_file(pkg):
+            version = str(load(pkg, {}).get('version') or 'unknown')
+    except (OSError, ValueError, TypeError):
+        version = 'unknown'
+    if repo and repo.get('head'):
+        version = version + '+' + repo['head']
+    blocked = ''
+    if not manager:
+        blocked = 'codex-router CLI is missing from the checkout'
+    elif not repo:
+        blocked = 'No Git checkout; use the official installer before enabling updates'
+    elif repo.get('tracked_dirty'):
+        blocked = 'Tracked files have local changes; official updater refuses them'
+    elif repo.get('branch') != 'main' or repo.get('upstream') != 'origin/main':
+        blocked = 'Updates require the managed checkout on origin/main'
+    elif not recognized_codex_router_origin(repo.get('origin') or ''):
+        blocked = 'Origin remote is not the recognized Codex Router repository'
+    return [item('codex_router', 'codex-router', path, version, 'harnesses',
+                 source=repo['origin'] if repo else '', blocked=blocked, git=repo,
+                 manager=manager, label='Codex Router')]
+
+
 def harnesses(probe, managed):
     rows = []
-    for name in ['codex', 'claude', 'cursor', 'cursor-agent', 'gemini', 'grok', 'pi', 'hermes', 'opencode', 'aider', 'openclaw', 'goose', 'amp']:
+    rows.extend(codex_router_rows(probe))
+    owned = list(managed) + rows
+    for name in ['codex', 'claude', 'cursor', 'cursor-agent', 'gemini', 'grok', 'pi', 'hermes', 'opencode', 'aider', 'openclaw', 'goose', 'amp', 'codex-router']:
+        if name not in HARNESS_NAMES:
+            continue
         for exe in probe.executables(name):
             resolved = str(Path(exe).resolve())
             label = HARNESS_NAMES[name]
-            owner = next((r for r in managed if r.get('label') == label and (
+            owner = next((r for r in owned if r.get('label') == label and (
                 (r['kind'] == 'npm' and resolved.startswith(r['location'] + os.sep)) or
-                (r['kind'].startswith('brew_') and resolved.startswith(str(Path(r['manager']).parent.parent) + os.sep)))), None)
+                (r['kind'].startswith('brew_') and resolved.startswith(str(Path(r['manager']).parent.parent) + os.sep)) or
+                (r['kind'] == 'codex_router' and resolved.startswith(r['location'] + os.sep)))), None)
             repo = None if owner else probe.git(Path(exe).resolve())
             blocked = 'Verify installation ownership and native update procedure'
             if repo: blocked = 'Source checkout; preserve branch, local changes, dependencies and service deployment'
@@ -559,9 +608,11 @@ def action(row):
     elif kind == 'skill_repo':
         # No checkout/reset/stash. Branch/upstream/dirty checks are repeated by every fresh scan.
         argv = [manager, '-C', row['location'], 'pull', '--ff-only']
+    elif kind == 'codex_router':
+        argv = [manager, 'update']
     else: raise ValueError('No exact-target adapter for ' + kind)
     return dict(id=row['id'], name=name, category=row['category'], before=row['version'], refresh=refresh, argv=argv,
-                scope=('Whole source repository, including non-skill files' if kind == 'skill_repo' else 'Selected package and required dependencies'),
+                scope=('Official Codex Router updater; may restart the background service' if kind == 'codex_router' else 'Whole source repository, including non-skill files' if kind == 'skill_repo' else 'Selected package and required dependencies'),
                 restart=('May restart programs/services through its native updater' if kind not in ('skill_repo', 'uv', 'pipx') else 'No KSU-requested restart'))
 
 

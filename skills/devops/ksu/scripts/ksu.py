@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 DEFAULT = Path.home() / ".local" / "state" / "ksu"
 
 
@@ -133,9 +133,10 @@ def run(state, dry=False):
             result = dict(id=target["id"], name=target["name"], before=target["before"], attempts=[])
             # Recheck a source checkout immediately before mutation. Never stash or reset it.
             original = next(r for r in current['items'] if r['id'] == target['id'])
-            if original['kind'] == 'skill_repo':
+            if original['kind'] in ('skill_repo', 'codex_router'):
                 git = inventory.Probe(path=cfg['path']).git(original['location'])
-                if not git or git['dirty'] or git['branch'] != original['git']['branch'] or git['upstream'] != original['git']['upstream'] or git['origin'] != original['git']['origin']:
+                dirty = git.get('tracked_dirty') if original['kind'] == 'codex_router' and git else (git.get('dirty') if git else True)
+                if not git or dirty or git['branch'] != original['git']['branch'] or git['upstream'] != original['git']['upstream'] or git['origin'] != original['git']['origin']:
                     result.update(status='blocked', reason='Repository changed since discovery')
                     receipt['items'].append(result); save(state/'receipt.json',receipt); continue
             code = 0

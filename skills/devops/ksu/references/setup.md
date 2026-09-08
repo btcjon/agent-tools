@@ -27,7 +27,7 @@ Use actual IDs from this machine's inventory, never the illustrative ID above. S
 
 | Area | Discovery and update scope |
 |---|---|
-| AI harnesses | Known CLI names across PATH and common user locations, package-owned installations, versions where available, common Hermes/source checkout locations, Mac app bundles, branch/upstream/local-change evidence. Unknown installers remain visible and blocked. |
+| AI harnesses | Known CLI names across PATH and common user locations, package-owned installations, versions where available, common Hermes/source checkout locations, Mac app bundles, branch/upstream/local-change evidence. Unknown installers remain visible and blocked. A recognized Codex Router checkout at `~/.local/share/codex-router` uses `codex-router update` and may restart its LaunchAgent/systemd service. |
 | Homebrew | Installed formulae and casks, versions, taps, pins; exact selected package upgrades. |
 | npm | Each discovered global prefix and configured registry; exact selected global packages. Linked/local packages remain blocked. Multiple Node installations can be separate targets. |
 | pipx | Installed tool environments and versions; uncomplicated registry tools can be upgraded individually. Constrained/direct/local installs require review. |

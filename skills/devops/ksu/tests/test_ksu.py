@@ -248,6 +248,35 @@ class KSU(unittest.TestCase):
         command=inv.action(rows[0])['argv']
         self.assertIn('--features=special',command);self.assertIn('--no-default-features',command);self.assertIn('--version=^1',command)
 
+    def test_codex_router_uses_native_updater_and_blocks_tracked_edits(self):
+        root=self.home/'.local/share/codex-router'; (root/'bin').mkdir(parents=True)
+        cli=root/'bin'/'codex-router'; cli.write_text('#!/bin/sh\n'); cli.chmod(0o700)
+        (root/'package.json').write_text('{"version":"0.5.1"}')
+        git=dict(root=str(root),branch='main',upstream='origin/main',dirty=True,tracked_dirty=False,
+                 origin='https://github.com/duolahypercho/codex-router.git',head='abc1234')
+        rows=inv.codex_router_rows(FakeProbe(self.home,repos={str(root):git}))
+        self.assertEqual(len(rows),1); self.assertEqual(rows[0]['kind'],'codex_router')
+        self.assertFalse(rows[0]['blocked'])
+        self.assertEqual(inv.action(rows[0])['argv'],[str(cli),'update'])
+        git['tracked_dirty']=True
+        blocked=inv.codex_router_rows(FakeProbe(self.home,repos={str(root):git}))[0]
+        self.assertIn('Tracked files',blocked['blocked'])
+        git['tracked_dirty']=False; git['branch']='detached'
+        self.assertIn('origin/main',inv.codex_router_rows(FakeProbe(self.home,repos={str(root):git}))[0]['blocked'])
+        git['branch']='main'; git['origin']='https://example.test/fork'
+        self.assertIn('recognized',inv.codex_router_rows(FakeProbe(self.home,repos={str(root):git}))[0]['blocked'])
+
+    def test_codex_router_defer_policy_requires_review(self):
+        root=self.home/'.local/share/codex-router'; (root/'bin').mkdir(parents=True)
+        cli=root/'bin'/'codex-router'; cli.write_text('#!/bin/sh\n'); cli.chmod(0o700)
+        (root/'package.json').write_text('{"version":"0.5.1"}')
+        git=dict(root=str(root),branch='main',upstream='origin/main',dirty=False,tracked_dirty=False,
+                 origin='https://github.com/duolahypercho/codex-router.git',head='abc1234')
+        rows=inv.codex_router_rows(FakeProbe(self.home,repos={str(root):git}))
+        self.selected(rows)
+        self.assertTrue(inv.plan(self.state,restart_policy='defer')['blocked'])
+        self.assertTrue(inv.plan(self.state,restart_policy='services')['actions'])
+
     def test_scheduler_definitions(self):
         for system in ['Darwin','Linux','Windows']:
             with self.subTest(system=system),patch.object(k.platform,'system',return_value=system),patch.object(k.Path,'home',return_value=self.state),patch.object(k,'checked') as check,patch.object(k.subprocess,'run'):

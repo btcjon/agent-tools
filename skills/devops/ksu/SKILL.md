@@ -27,6 +27,8 @@ Nightly runs rediscover first and generate **exact-target commands**, not manage
 
 Use package-owned harness entries when discovered and verified. Source checkouts and custom harness builds need their maintained update/deploy process; never reset branches, discard local commits, recreate environments, or restart gateways generically. Service definitions and available runtime states are inventory context, not proof of a successful restart or healthy application.
 
+A recognized Codex Router Git checkout at `~/.local/share/codex-router` is a first-class harness. Its adapter runs the official `codex-router update` command, not a generic `git pull`. Tracked local edits, a non-`main` checkout, or an unrecognized origin stay blocked. Untracked files do not block the official updater. The managed `~/.codex/skills/codex-router*` copies are consumer projections of that checkout, not independent update targets.
+
 Identify the shared skill authority from the local skill-system manifest. Consumer projections are never independent update targets. Use the user's authority publication workflow for governed skills. Ordinary clean main/master skill-source repositories can be selected as whole-source updates; customized, detached, dirty or unresolved repositories remain blocked. Plugin caches are not proof of active installation and are updated through their owning harness.
 
 ## Quiet maintenance and recovery
