@@ -1,61 +1,98 @@
-# Install and operate KSU
+# KSU v0.2: discovery and selection
 
-Requires Python 3.9+ and Topgrade 17.9.0 or newer. Tested engine schema: 17.9.0. Install Topgrade through a trusted platform manager using its [official instructions](https://github.com/topgrade-rs/topgrade#installation). Do not pipe an unreviewed remote script into a privileged shell. Keep Topgrade itself covered by the selected package manager.
+Point an Agent Skills-compatible agent at [KSU](https://github.com/btcjon/custom-skills/tree/main/skills/devops/ksu) and ask it to discover your machines' AI harnesses, packages and skills before enabling maintenance. Clone the public repository and load `SKILL.md`. No private infrastructure, paid agent session, or Topgrade installation is required for the selection runner.
 
-Point any Agent Skills-compatible agent at:
+## Review without updating anything
 
-https://github.com/btcjon/custom-skills/tree/main/skills/devops/ksu
+```sh
+python3 scripts/ksu.py discover
+# Open ~/.local/state/ksu/inventory.html locally.
+# Or have your agent present inventory.md.
+python3 scripts/ksu.py select --file /path/to/ksu-selections.json
+```
 
-Ask: “Install KSU on these machines; updates at 3 a.m. local time; allow app/service restarts and defer full reboots.” Clone the repository, load `skills/devops/ksu/SKILL.md`, then enroll each accessible machine locally or through its existing approved remote route. Skill source can be linked into the harness's supported skill folder; managed skill buses should publish through their authority. Do not copy runtime state between machines.
+The page has searchable categories, per-item checkboxes, a user-triggered “Select recommended” button, saved exclusions, source/branch information, blocker explanations, and an export button. Recommendations favor supported harnesses, global tools and skill sources. OS packages and other programs remain available but are not pre-recommended. No choices are initially enabled. Exporting downloads a small selection JSON; it does not update software or silently save a schedule.
 
-## Host setup
+Alternative selection surfaces:
+
+```sh
+python3 scripts/ksu.py select --interactive
+python3 scripts/ksu.py select --enable npm:THE_DISCOVERED_ID
+python3 scripts/ksu.py select --exclude npm:THE_DISCOVERED_ID
+```
+
+Use actual IDs from this machine's inventory, never the illustrative ID above. Selection imports reject unknown IDs, blocked targets, stale revisions, and foreign host IDs before writing anything. Additional inventory roots use `discover --root /path/to/skills` (repeat the option). They enumerate skill folders at up to two category levels, not arbitrary project dependencies.
+
+## What discovery covers
+
+| Area | Discovery and update scope |
+|---|---|
+| AI harnesses | Known CLI names across PATH and common user locations, package-owned installations, versions where available, common Hermes/source checkout locations, Mac app bundles, branch/upstream/local-change evidence. Unknown installers remain visible and blocked. |
+| Homebrew | Installed formulae and casks, versions, taps, pins; exact selected package upgrades. |
+| npm | Each discovered global prefix and configured registry; exact selected global packages. Linked/local packages remain blocked. Multiple Node installations can be separate targets. |
+| pipx | Installed tool environments and versions; uncomplicated registry tools can be upgraded individually. Constrained/direct/local installs require review. |
+| uv tools | Versions and receipt requirements; constraints are retained and source changes invalidate selections. Local/VCS/direct-source tools remain blocked. Receipt inspection requires Python 3.11+. |
+| Cargo / Rust | Installed registry binaries and toolchains; exact crate/channel updates. Cargo requirements, features, profile and target are retained from install metadata; missing metadata, Git-source crates and version-pinned/custom toolchains stay blocked. |
+| Debian/Ubuntu | Installed APT packages and holds; exact `--only-upgrade --no-remove` targets. Dependencies can change. |
+| RPM/DNF | Installed name/architecture/version; exact upgrades retaining DNF exclusions. |
+| Windows | WinGet export with versions and source IDs; exact ID/source upgrades after a readable pin check. Unknown/truncated pin output stays blocked. Unmatched software is not covered. Native Windows validation remains pending. |
+| Skills | Conventional skill roots plus explicit extra roots, real-path deduplication, projection aliases, repository origin/branch/dirty state. Clean tracked main/master source repos are whole-repository selections. |
+| Shared skills | Authority/consumer detection when a skill-system manifest exists. Consumer projections and authority publication workflows are visible but excluded from generic updates. |
+| Plugins | Conventional plugin directories and Codex plugin cache versions. Active installation is not inferred from a cached directory. Update through the harness. |
+| Other programs | Mac app-bundle versions and supported package-manager entries. Unmanaged vendor updaters require dedicated procedures. |
+| Environments/services | Common Python/Node environment directories are inventoried separately. Relevant launchd/systemd definitions and available user-manager runtime states are shown for context. |
+
+Discovery checks common `.local/bin`, Cargo, Bun, npm-global, mise/asdf, nvm and fnm locations even in a short noninteractive PATH. Manager commands use their own executable directory first so different Node installations do not accidentally share the wrong interpreter. Probes time out after 20 seconds and a 120-second command budget; unavailable or malformed probes appear in the gaps report. Placeholder files are not forcibly downloaded. Expected Git metadata gaps may also appear in that report.
+
+This is current-account discovery, not proof that every account, application, package manager, native installer, remote host or virtual environment was found. Flatpak, Snap, Conda, arbitrary pip environments, project lockfiles, firmware, containers and custom deployment systems need additional adapters. Do not claim blanket machine coverage.
+
+## Save and activate a schedule
 
 ```sh
 python3 scripts/ksu.py setup --time 03:00 --restart-policy services
 python3 scripts/ksu.py preview
-```
-
-State defaults to `~/.local/state/ksu`; use `--state-dir PATH` before the subcommand to override. Setup copies the runner there so the schedule does not depend on a checkout or synced drive. The saved PATH captures the installation account's manager locations. Repeat enrollment for other users when their installed software differs. Updating the skill source does not replace an already enrolled runner: after validation, copy the new runner to the local state directory between runs.
-
-Review `preview.log` alongside installed-app inventories. Edit `config.json`: fill `only` with the verified Topgrade step names and set `coverage_reviewed` to `true`. For example, a Homebrew-only enrollment uses `"only": ["brew_formula", "brew_cask"]`. This is partial coverage; do not label it complete-machine coverage. Add other steps only after their dry runs and prerequisites have been checked. `disable` adds explicit exclusions; it cannot override the built-in exclusions.
-
-Complete `coverage.md` with a table of software/manager, updater step, privilege requirement, restart behavior, verification command, and status (covered, pinned, unsupported, or pending). For unmanaged apps, look up the vendor's official updater. Never silently claim an app is covered because another package manager is present.
-
-```sh
-python3 scripts/ksu.py preview
+# Within the user's selected update authorization:
 python3 scripts/ksu.py run
 python3 scripts/ksu.py status
 python3 scripts/ksu.py schedule
 ```
 
-Read the actual first-run output and independently verify versions/outdated lists and important service health. `engine_completed` means the engine returned zero; skipped or pinned software can still exist. The `run` command performs real updates and belongs inside the user's authorized enrollment scope.
+Discovery and selection may happen before or after setup. State defaults to `~/.local/state/ksu`; pass `--state-dir PATH` before the subcommand to override. Setup copies both Python modules into that state directory. Config is local. The schedule never depends on the public repository or a synced skill file being available at 3 a.m.
 
-## Scheduling and privileges
+A nightly run rediscovers, checks saved source fingerprints and blockers, updates only selected supported targets, retries only failing transient operations (twice), then rediscovers for version/presence readback. Each item has its own outcome. Commands are static adapters with validated identifiers, not strings imported from JSON. Package updates may change dependencies; a selected skill repo includes its whole checkout. A successful command with unchanged version can simply mean already current, but KSU does not label that as independently proved latest-version coverage.
 
-- macOS: per-user LaunchAgents `org.ksu.nightly` and `org.ksu.watchdog`, 03:00 calendar schedule and hourly health check. Requires a logged-in user session. Launchd can catch a sleeping machine on wake; a powered-off or logged-out Mac is not always-on. Review `launchctl print gui/$(id -u)/org.ksu.nightly`. For boot-time unattended coverage, deploy a separately reviewed root-owned LaunchDaemon/helper; never run Homebrew as root.
-- Linux: per-user systemd services/timers `ksu-nightly` and `ksu-watchdog`, persistent catch-up, lingering enabled during setup. Verify `systemctl --user list-timers 'ksu-*'` and `loginctl show-user "$USER" -p Linger`. Sandboxes without systemd need the platform's scheduler; the bundled installer reports failure rather than pretending cron was installed.
-- Windows: Scheduled Tasks `KSU-nightly` and `KSU-watchdog`, catch-up enabled, overlap disabled. Default tasks use the enrolling account's interactive context. Validate signed-out execution separately before claiming unattended server coverage; configure the task's credential/logon type through Windows when required. Never save passwords in this repository or config. Windows scheduler and reboot generation have unit coverage but requires native Windows verification.
+`preview` performs discovery and writes/prints `plan.json`; it does not execute upgrade commands. Legacy `only`/`coverage_reviewed` fields from v0.1 are insufficient to authorize item updates. Empty selections cannot start an updater.
 
-Run package managers as their owning user. The POSIX runner wraps sudo with `-n`, so it fails instead of prompting. Existing narrow admin grants can be used; KSU does not create broad passwordless sudo rules. A system updater lacking admin access is pending coverage. Many Windows installers require elevation or cannot run silently; inventory those explicitly.
+## Restart, scheduler and privilege details
 
-`--restart-policy services` permits native updater app/service restarts, with full reboot deferred. `defer` requests no restarts but requires excluding managers that cannot enforce it. `reboot` requests a reboot only after a successful run and a recognized signal: Linux `/var/run/reboot-required` or `needs-restarting -r`, Windows servicing/Windows Update reboot registry markers, or macOS explicit restart-required updater output. Unknown signals remain pending. Reboot command outcomes are recorded. macOS/Windows reboot adapters are unit-tested, not verified by rebooting a live machine. Configuration is user-selectable; inspect native vendor reboot behavior during enrollment.
+- `services` (default): native updater app/service restarts are permitted; no KSU-requested full reboot.
+- `defer`: strict no-restart mode blocks adapters whose native installers may restart things. Currently only skill-repository, uv and pipx actions are eligible; these do not ask KSU to restart services.
+- `reboot`: opt-in reboot only after success and a recognized OS signal. Linux uses `/var/run/reboot-required` or `needs-restarting -r`; Windows uses servicing/Windows Update registry markers; macOS uses explicit restart-required updater output. Unknown signals remain pending. Reboot adapters have unit coverage, not destructive live reboot testing.
 
-## Quiet recovery, status, rollback
+macOS uses per-user LaunchAgents `org.ksu.nightly` and `org.ksu.watchdog`. A logged-in session is required; this is not a boot-time root daemon. Linux uses persistent user systemd timers `ksu-nightly` and `ksu-watchdog`, with lingering enabled. Windows uses Scheduled Tasks under the enrolling account; signed-out/elevated operation requires native setup and verification. Sandboxes without these schedulers need their platform's scheduler. KSU never creates broad passwordless sudo rules; POSIX sudo uses `-n` and permission failures remain visible.
 
-Two retries follow transient failures, with 60/120-second backoff. Unknown errors are preserved for agent diagnosis. Package transactions are not killed on timeout: interrupting them can corrupt state. After four hours, the watchdog marks a running job stale. After 36 hours without a run, it marks stale; it never starts a second updater over an uncertain transaction. The watchdog updates `health.json` hourly. A fully dead machine cannot monitor itself; fleet-level monitoring requires a separate always-on controller.
+Check the actual scheduler with `launchctl print`, `systemctl --user list-timers 'ksu-*'` plus `loginctl show-user "$USER" -p Linger`, or Windows Task Scheduler. Existing update services appear in the inventory so the agent can prevent overlapping coverage. Their presence alone does not automatically disable KSU or those services.
 
-`status` prints the receipt and coverage path; `watchdog` writes health quietly. Exit status is nonzero for unhealthy state. The runner retains latest and previous updater logs. Native scheduler stdout/stderr should be rotated by host log management. Default notification policy is silent, including recorded failures; opt-in delivery belongs in the user's existing notification system.
+## Runtime upgrades, health and removal
+
+After obtaining a new KSU release:
+
+```sh
+python3 scripts/ksu.py install-runtime
+```
+
+This replaces the host-local modules under the same process lock, staging the entrypoint last and preserving selections/config. It refuses an unfinished transaction. For v0.1 migration, then run discovery and make selections before the next scheduled update. Do not distribute one host's state to another.
+
+The hourly watchdog records stale jobs after four hours, missed runs after 36 hours, and failures in `health.json`. It does not launch overlapping transactions or notify the user by default. A dead machine cannot monitor itself; fleet-wide health needs a separate always-on controller. Logs retain the latest and previous update run. Scheduler logs use host log management. Inspect `receipt.json` before clearing an interrupted transaction's `running` state.
 
 ```sh
 python3 scripts/ksu.py unschedule
 ```
 
-This disables/removes KSU schedules and preserves receipts/config. It does not downgrade updated packages or disable other software's native updater. Use the package vendor's supported rollback or machine backup if needed. Never claim generic rollback can reverse arbitrary package upgrades.
+This removes KSU schedules and preserves local evidence. It does not undo package updates or change other updaters. Use supported package rollback or backups when needed.
 
-## Sources
+## Validation and upstream behavior
 
-- [Topgrade engine and supported platforms](https://github.com/topgrade-rs/topgrade)
-- [Pinned configuration reference](https://github.com/topgrade-rs/topgrade/blob/v17.9.0/config.example.toml)
-- [Homebrew upgrade behavior](https://docs.brew.sh/Manpage#upgrade-options-installed_formulainstalled_cask-)
-- [Windows package upgrade](https://learn.microsoft.com/en-us/windows/package-manager/winget/upgrade)
-- [systemd timers](https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html)
+Run `python3 -m unittest discover -s tests -v`. Tests use synthetic inventories and mocked update commands; they never upgrade the test machine. Linux/macOS discovery has also been exercised on real hosts. Selection/export/import data contracts are tested. Native Windows and rendered-browser validation remain pending.
+
+Primary references: [Homebrew](https://docs.brew.sh/Manpage), [npm update](https://docs.npmjs.com/cli/commands/npm-update), [pipx](https://pipx.pypa.io/stable/reference/cli.html), [uv tools](https://docs.astral.sh/uv/concepts/tools/), [Cargo install](https://doc.rust-lang.org/cargo/commands/cargo-install.html), [WinGet export](https://learn.microsoft.com/en-us/windows/package-manager/winget/export), [WinGet upgrade](https://learn.microsoft.com/en-us/windows/package-manager/winget/upgrade).

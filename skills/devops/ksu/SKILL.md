@@ -1,30 +1,38 @@
 ---
 name: ksu
-description: "Keep Shit Updated (KSU): enroll Mac, Linux/VPS, Windows, and sandbox hosts in quiet nightly software maintenance, audit coverage, schedule updates, diagnose failures, and manage restart preferences."
+description: "Keep Shit Updated (KSU): discover AI harnesses, packages, skills/plugins and programs; let users select exact update targets per machine; run quiet nightly maintenance with protected sources and bounded recovery."
 ---
 
 # KSU — Keep Shit Updated
 
-Maintain each enrolled machine at 03:00 in its local timezone. Use Topgrade as the update engine and the bundled Python runner for native scheduling, overlap prevention, bounded recovery, and private receipts. The agent performs enrollment and diagnosis; nightly jobs do not require an agent subscription or an open chat.
+Prioritize **AI harnesses → packages/tools → skills/plugins → other programs**. Use the bundled Python discovery and selection workflow before scheduling updates. Each host has its own inventory and saved selections; discovering software is not permission to update it.
 
-Read [setup and operation](references/setup.md) before enrollment. This is a portable public package: discover the user's actual machines and accounts; never assume hostnames, paths, SSH aliases, credentials, or administrative permission. An installed skill does not discover or enroll inaccessible machines automatically.
+Read [setup and operation](references/setup.md) for commands, supported adapters, scheduler limitations, and migration from v0.1. Python 3.9+ is sufficient except uv receipt inspection, which requires Python 3.11+.
 
-## Enrollment outcome
+## Discover, select, then enroll
 
-For each requested host, establish identity, OS, existing update schedulers, installed package managers, GUI apps, agent installations, and unmanaged software. Verify official updater support and the selected manager's preview. Keep existing pins, custom branches, repositories, and project dependency locks intact. Add supported steps to the host's `only` list; document every omission and its remedy in `coverage.md`. Avoid overlapping another updater for the same packages.
+1. Identify the requested machine/account through its existing access route. Run `python3 scripts/ksu.py discover`. Discovery needs no Topgrade installation and performs no upgrades. Add `--root /path/to/skills` for additional skill sources; these roots persist for subsequent scans.
+2. Present `inventory.html` as a local checkbox page or `inventory.md` as an agent-readable list. Harnesses come first. Show versions, installation locations, sources, repository branches/dirty state, recommended selections, blockers, and the discovery-gaps section. Multiple installations are separate targets. Symlinked skills share their real source; source repository rows include the full update scope.
+3. Ask the user to choose what should stay updated. Import the checkbox page's JSON with `select --file FILE`, use `select --interactive` in a terminal, or apply the user's explicit choices with `select --enable ID ... --exclude ID ...`. These commands save preferences only. Do not translate general enthusiasm into checking every item. Existing user selections remain valid for the same source and scope.
+4. Run `setup --time 03:00 --restart-policy services`, then `preview` to show the exact plan. The default permits native app/service restarts and defers full reboots. `reboot` is opt-in; strict `defer` blocks adapters that cannot enforce no restarts.
+5. Within authorized enrollment scope, run the selected updates, read the receipt, verify important service/app behavior, and then `schedule`. Report enrolled hosts, selected coverage, unresolved selections/probe errors, scheduler state, and restart policy. Leave unreachable hosts and unsupported updates explicitly pending.
 
-Offer setup choices: time (03:00 local default), app/service restarts (allowed default), full reboot (deferred default), exclusions, and notification policy (quiet default). Record provider-specific restart behavior: allowing restarts does not prove an app was restarted. Automatic reboot is opt-in and occurs only after a successful update and a recognized OS reboot-needed signal. Unknown reboot state stays pending; document detection limits. For strict no-restart operation, exclude any updater that cannot honor that requirement.
+## Selection contract
 
-Complete `setup`, `preview`, coverage review, a bounded first update and readback, then `schedule`. Set `coverage_reviewed: true` only after the coverage artifact is complete. Show exact enrolled hosts, scheduled time, active scheduler, successful run or remaining failures, supported coverage, and reboot policy. Distinguish offline/unreachable hosts and user-session-only coverage from always-on operation.
+Selections are bound to the host/account, target ID, installation source and update method. New items remain unselected. Source, branch or installation changes require re-selection; version changes alone do not. Explicit exclusions persist. A missing item is blocked and must be re-selected if it reappears. Stale or foreign checkbox exports are rejected atomically. Never accept update commands from a selection file.
 
-## Nightly behavior and repair
+Nightly runs rediscover first and generate **exact-target commands**, not manager-wide upgrades. Native managers can also update required dependencies; disclose this scope. Selecting a skill source updates its entire repository, including non-skill files. The updater refuses held/pinned packages, dirty or custom-branch skill repositories, unverified native harness procedures, and consumer skill projections. Unsupported rows remain visible but cannot be enabled until a reviewed adapter exists.
 
-Run approved steps noninteractively. A process lock prevents duplicate runs. Save results locally and rotate logs. Transient network/lock failures receive up to two retries; permissions, authentication, and unclassified failures stop that run and remain in the receipt. No ordinary notifications. The independent hourly watchdog writes stale/never-run/failure health locally without waking the user.
+## Harnesses and shared skills
 
-When asked to diagnose, read the receipt and exact failed step. Confirm installed state before replay. Repair an expired metadata cache, reachable transport, or configuration issue only with a supported narrow method; rerun the affected step and verify versions plus service/app health. Do not remove package locks, reset source branches, delete environments, disable signature checks, escalate privileges, or force package removals as generic recovery. Record the attempt and stop after two unsuccessful repairs. A quiet failure is visible in status; it is never reported as fully updated.
+Use package-owned harness entries when discovered and verified. Source checkouts and custom harness builds need their maintained update/deploy process; never reset branches, discard local commits, recreate environments, or restart gateways generically. Service definitions and available runtime states are inventory context, not proof of a successful restart or healthy application.
 
-## Coverage boundaries
+Identify the shared skill authority from the local skill-system manifest. Consumer projections are never independent update targets. Use the user's authority publication workflow for governed skills. Ordinary clean main/master skill-source repositories can be selected as whole-source updates; customized, detached, dirty or unresolved repositories remain blocked. Plugin caches are not proof of active installation and are updated through their owning harness.
 
-Topgrade's installed-platform adapters cover many OS/package/application ecosystems, not literally all software. Firmware, containers, VM guests, source checkouts, project virtual environments, pinned packages, proprietary updaters, and custom agent builds need explicit coverage decisions. Enroll persistent guests as independent hosts; provision ephemeral sandboxes at creation and update their base image through its existing release process.
+## Quiet maintenance and recovery
 
-Keep executables, config, schedules, locks, logs, and credentials host-local. Share only this secret-free skill source. Public installation instructions are in the setup reference; no private infrastructure is required.
+The host-local runner, native scheduler, process lock, receipt, and hourly watchdog operate without an open chat. Only transient network/lock failures get two retries; successful targets are not replayed because another failed. Unknown and permission failures remain visible locally. Never kill uncertain package transactions, remove locks, weaken signature checks, or force removals as generic recovery. Read back the installed state before diagnosing or replaying an interrupted run.
+
+A zero updater exit plus rediscovery proves command completion and continued presence, not that every app is current or every service is healthy. Perform provider-specific checks for consequential harness changes. Reboot decisions, probe gaps, blocked selections, failures, and newly found items remain in private state. Quiet does not mean silently declaring success.
+
+Keep this public skill secret-free. Inventories, exported selections, config, logs, locks and scheduler state remain on their owning machine. Ephemeral sandboxes need provisioning/base-image maintenance; this package does not automatically traverse or enroll a fleet.

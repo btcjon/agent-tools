@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""KSU: host-local nightly maintenance around Topgrade. Python 3.9+, no dependencies."""
+"""KSU: host-local discovery, selected updates, and nightly maintenance. Python 3.9+, no dependencies."""
 import argparse
 import contextlib
 import datetime as dt
@@ -13,10 +13,8 @@ import subprocess
 import sys
 import time
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 DEFAULT = Path.home() / ".local" / "state" / "ksu"
-# Broad engine discovery is narrowed at enrollment after reviewing its dry run.
-BASE_DISABLE = ["remotes", "git_repos", "myrepos", "vagrant", "containers", "firmware", "self_update", "custom_commands", "restarts", "skills"]
 
 
 def save(path, obj):
@@ -68,21 +66,6 @@ def execute(argv, env, logfile):
             return 127
 
 
-def engine_config(cfg, path):
-    disabled = sorted(set(BASE_DISABLE + cfg.get("disable", [])))
-    # KSU isolates the engine from the user's interactive Topgrade config/hooks.
-    s = '[misc]\nassume_yes = true\nask_retry = false\nauto_retry = 0\nnotify_end = "never"\npre_sudo = false\ncleanup = false\nno_self_update = true\nshow_skipped = true\n'
-    s += "disable = " + json.dumps(disabled) + "\n"
-    if cfg.get("only"):
-        s += "only = " + json.dumps(cfg["only"]) + "\n"
-    s += '\n[brew]\ngreedy_cask = true\nautoremove = false\n'
-    s += '\n[linux]\napt_arguments = "--no-remove"\n'
-    s += '\n[git]\npull_predefined = false\n'
-    s += '\n[windows]\naccept_all_updates = true\nupdates_auto_reboot = "no"\nwinget_silent_install = true\n'
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(s)
-
-
 def environment(state, cfg):
     env = os.environ.copy()
     env.update(PATH=cfg["path"],
@@ -105,56 +88,81 @@ def failure_class(text):
     text = text.lower()
     if any(x in text for x in ("password is required", "authentication", "permission denied", "not in the sudoers", "a terminal is required")):
         return "credentials_or_permissions"
-    if any(x in text for x in ("could not get lock", "unable to acquire", "another process", "timed out", "temporary failure", "connection reset", "429", "503", "network is unreachable", "could not resolve")):
+    if any(x in text for x in ("could not get lock", "unable to acquire", "another process", "timed out", "temporary failure", "connection reset", "429 too many", "503 service unavailable", "http 429", "http 503", "network is unreachable", "could not resolve")):
         return "transient"
     return "needs_diagnosis"
 
 
 def run(state, dry=False):
+    """Fresh discovery, exact saved targets, independent failure receipts, version readback."""
+    import ksu_inventory as inventory
     cfg = read(state / "config.json")
-    if not dry and (not cfg.get("coverage_reviewed") or not cfg.get("only")):
-        raise RuntimeError("Review coverage and enroll explicit Topgrade steps before running")
     env = environment(state, cfg)
-    config = state / "engine-config" / "topgrade.toml"
-    engine_config(cfg, config)
     with lock(state):
         if not dry and (state / "receipt.json").exists() and read(state / "receipt.json").get("status") == "running":
-            raise RuntimeError("Previous transaction outcome is unknown; verify package processes/state before clearing the running receipt")
-        log = state / ("preview.log" if dry else "latest.log")
-        if log.exists():
-            os.replace(log, state / (log.name + ".previous"))
-        argv = [cfg["topgrade"], "--config", str(config), "--yes", "--no-retry", "--skip-notify", "--no-self-update", "--disable", *sorted(set(BASE_DISABLE + cfg.get("disable", [])))]
-        if cfg.get("only"):
-            argv += ["--only", *cfg["only"]]
+            raise RuntimeError("Previous transaction outcome is unknown; inspect it before another run")
+        if not (state / "selections.json").exists():
+            raise RuntimeError("Run discover and select first; legacy broad Topgrade steps do not authorize item updates")
+        current = inventory.scan(state, probe=inventory.Probe(path=cfg["path"]))
+        planned = inventory.plan(state, current, cfg["restart_policy"])
         if dry:
-            argv.append("--dry-run")
-            return execute(argv, env, log)
-        receipt = {"version": VERSION, "host": platform.node(), "started": now(),
-                   "status": "running", "pid": os.getpid(), "attempts": [], "log": str(log)}
+            print(json.dumps(planned, indent=2)); return 1 if planned["blocked"] else 0
+        if not planned["actions"] and not planned["blocked"]:
+            raise RuntimeError("No selected update targets")
+        log = state / "latest.log"
+        if log.exists(): os.replace(log, state / "latest.log.previous")
+        receipt = dict(version=VERSION, host=platform.node(), started=now(), status="running", pid=os.getpid(),
+                       items=[], blocked=planned["blocked"], new_items=planned["new_items"], log=str(log))
         save(state / "receipt.json", receipt)
-        for attempt in range(cfg["retries"] + 1):
-            offset = log.stat().st_size if log.exists() else 0
-            code = execute(argv, env, log)
-            with log.open("rb") as f:
-                f.seek(offset); output = f.read().decode(errors="replace")
-            category = "success" if code == 0 else failure_class(output)
-            receipt["attempts"].append({"exit_code": code, "classification": category, "at": now()})
-            save(state / "receipt.json", receipt)
-            if code == 0 or category != "transient" or attempt == cfg["retries"]:
-                break
-            # Only transient faults get a repeat; unknown outcomes are not blindly replayed.
-            time.sleep(min(60 * (attempt + 1), 300))
-        receipt.update(status="engine_completed" if code == 0 else "needs_attention", finished=now())
-        try:
-            receipt["reboot_required"] = reboot_required(log, env)
-        except (OSError, subprocess.TimeoutExpired):
-            receipt["reboot_required"] = "unknown"
-        save(state / "receipt.json", receipt)
-        # Reboot is deliberately separate from the updater so receipt survives.
-        if code == 0 and cfg["restart_policy"] == "reboot" and receipt["reboot_required"] is True:
-            receipt["reboot_exit_code"] = execute(reboot_command(), env, log)
-            save(state / "receipt.json", receipt)
-        return code
+        refreshed = {}
+        def attempt(argv):
+            outcomes = []
+            for n in range(min(max(cfg.get("retries", 2), 0), 2) + 1):
+                offset = log.stat().st_size if log.exists() else 0
+                command_env = env.copy()
+                if Path(argv[0]).is_absolute():
+                    command_env['PATH'] = str(state/'bin') + os.pathsep + str(Path(argv[0]).parent) + os.pathsep + env['PATH']
+                code = execute(argv, command_env, log)
+                with log.open("rb") as f: f.seek(offset); output = f.read().decode(errors="replace")
+                category = "success" if code == 0 else failure_class(output)
+                outcomes.append(dict(exit_code=code, classification=category))
+                if code == 0 or category != "transient" or n >= min(cfg.get("retries", 2), 2): break
+                time.sleep(60 * (n + 1))
+            return code, outcomes
+        for target in planned["actions"]:
+            result = dict(id=target["id"], name=target["name"], before=target["before"], attempts=[])
+            # Recheck a source checkout immediately before mutation. Never stash or reset it.
+            original = next(r for r in current['items'] if r['id'] == target['id'])
+            if original['kind'] == 'skill_repo':
+                git = inventory.Probe(path=cfg['path']).git(original['location'])
+                if not git or git['dirty'] or git['branch'] != original['git']['branch'] or git['upstream'] != original['git']['upstream'] or git['origin'] != original['git']['origin']:
+                    result.update(status='blocked', reason='Repository changed since discovery')
+                    receipt['items'].append(result); save(state/'receipt.json',receipt); continue
+            code = 0
+            for command in target["refresh"]:
+                key = tuple(command)
+                if key not in refreshed: refreshed[key] = attempt(command)
+                code, outcomes = refreshed[key]
+                if code:
+                    result["attempts"] = outcomes; result["reason"] = "Metadata refresh failed"; break
+            if code == 0: code, result["attempts"] = attempt(target["argv"])
+            result["status"] = "command_completed" if code == 0 else "needs_attention"
+            receipt["items"].append(result); save(state / "receipt.json", receipt)
+        after = inventory.scan(state, probe=inventory.Probe(path=cfg["path"]))
+        indexed = {r['id']: r for r in after['items']}
+        for result in receipt['items']:
+            row = indexed.get(result['id'])
+            result['after'] = row['version'] if row else None
+            if result['status'] == 'command_completed':
+                result['status'] = 'command_completed_and_present' if row and not row['blocked'] else 'verification_incomplete'
+        okay = not receipt['blocked'] and all(r['status'] == 'command_completed_and_present' for r in receipt['items'])
+        receipt.update(status='engine_completed' if okay else 'needs_attention', finished=now(), discovery_errors=after['errors'])
+        try: receipt['reboot_required'] = reboot_required(log, env) if log.exists() else 'unknown'
+        except (OSError, subprocess.TimeoutExpired): receipt['reboot_required'] = 'unknown'
+        save(state/'receipt.json',receipt)
+        if okay and cfg['restart_policy'] == 'reboot' and receipt['reboot_required'] is True:
+            receipt['reboot_exit_code'] = execute(reboot_command(),env,log); save(state/'receipt.json',receipt)
+        return 0 if okay else 1
 
 
 def reboot_command():
@@ -195,7 +203,7 @@ def health(state):
         status = "stale"
     report = {"host": platform.node(), "status": status, "age_seconds": age,
               "schedule": cfg["time"], "restart_policy": cfg["restart_policy"],
-              "coverage": str(state / "coverage.md"), "receipt": receipt}
+              "coverage": str(state / "inventory.html"), "receipt": receipt}
     save(state / "health.json", report)
     return report
 
@@ -264,27 +272,33 @@ def install_scheduler(state, cfg, remove=False):
         raise RuntimeError("No native scheduler adapter for " + platform.system())
 
 
+def install_runtime(state):
+    """Stage both runtime modules; replace the entrypoint last while holding the run lock."""
+    with lock(state):
+        receipt = read(state/'receipt.json') if (state/'receipt.json').exists() else {}
+        if receipt.get('status') == 'running': raise RuntimeError('Inspect the unfinished update before replacing its runner')
+        staged = []
+        for name in ['ksu_inventory.py', 'ksu.py']:
+            source = Path(__file__).parent/name
+            if source.resolve() == (state/name).resolve(): continue
+            target = state/(name+'.new')
+            shutil.copy2(source,target); staged.append((target,state/name))
+        for temp,target in staged: os.replace(temp,target)
+
+
 def setup(args, state):
     if (state / "config.json").exists():
         raise RuntimeError("Already enrolled; edit config.json and use schedule to apply changes")
     engine = shutil.which(args.topgrade)
-    if not engine:
-        raise RuntimeError("Install Topgrade 17.9+ using its official platform instructions first")
-    version = subprocess.run([engine, "--version"], capture_output=True, text=True, check=True, timeout=10).stdout.strip()
-    import re
-    match = re.search(r"(\d+)\.(\d+)\.(\d+)", version)
-    if not match or tuple(map(int, match.groups())) < (17, 9, 0):
-        raise RuntimeError("Topgrade 17.9.0 or newer is required")
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     if os.name != "nt":
         state.chmod(0o700)
     cfg = {"version": VERSION, "time": args.time, "restart_policy": args.restart_policy,
-           "retries": 2, "topgrade": str(Path(engine).resolve()), "path": os.environ.get("PATH", ""),
+           "retries": 2, "topgrade": str(Path(engine).resolve()) if engine else None, "path": os.environ.get("PATH", ""),
            "only": [], "disable": [], "host": platform.node()}
     save(state / "config.json", cfg)
-    shutil.copy2(__file__, state / "ksu.py")
-    (state / "coverage.md").write_text("# KSU host coverage\n\nEnrollment pending: review preview.log with your agent. Record discovered managers, installed apps, unsupported software, privileges, exclusions, health probes, and restart limits here. Engine success alone does not prove every application is current.\n")
-    print("Prepared " + str(state) + ". Run preview; review coverage; then schedule.")
+    install_runtime(state)
+    print("Prepared " + str(state) + ". Run discover, review inventory.html, and save selections before scheduling.")
 
 
 def main():
@@ -295,12 +309,46 @@ def main():
     init.add_argument("--time", default="03:00")
     init.add_argument("--restart-policy", choices=["services", "reboot", "defer"], default="services")
     init.add_argument("--topgrade", default="topgrade")
-    for name in ["preview", "run", "status", "watchdog", "schedule", "unschedule"]:
+    discover = sub.add_parser("discover")
+    discover.add_argument("--root", action="append", help="Additional skill root; saved for future scans")
+    select = sub.add_parser("select")
+    select.add_argument("--file", type=Path, help="Import the checkbox page's exported JSON")
+    select.add_argument("--enable", nargs="*", default=[])
+    select.add_argument("--exclude", nargs="*", default=[])
+    select.add_argument("--interactive", action="store_true", help="Review supported items in a terminal")
+    for name in ["preview", "run", "status", "watchdog", "schedule", "unschedule", "install-runtime"]:
         sub.add_parser(name)
     args = p.parse_args(); state = args.state_dir.expanduser().resolve()
     if args.command == "setup":
         dt.datetime.strptime(args.time, "%H:%M")
         setup(args, state); return 0
+    if args.command == "install-runtime":
+        install_runtime(state); print("Updated host-local runner; selections and schedule preserved."); return 0
+    if args.command == "discover":
+        import ksu_inventory as inventory
+        state.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with lock(state):
+            result = inventory.scan(state, roots=args.root)
+        print(json.dumps({"items": len(result["items"]), "probe_errors": result["errors"], "review": str(state / "inventory.html")}, indent=2))
+        return 0
+    if args.command == "select":
+        import ksu_inventory as inventory
+        with lock(state):
+            if args.interactive:
+                if not sys.stdin.isatty(): raise ValueError("Interactive selection needs a terminal; use --file or explicit IDs")
+                data = read(state / "inventory.json")
+                enabled, excluded = [], []
+                for row in data["items"]:
+                    if row["blocked"]: continue
+                    answer = input(row['category'] + ' | ' + row['name'] + ' | ' + row['location'] + ' [y/n/Enter=keep/q=cancel]: ').lower()
+                    if answer == 'q': return 0
+                    if answer == 'y': enabled.append(row['id'])
+                    elif answer == 'n': excluded.append(row['id'])
+                choices = inventory.choose(state, enabled, excluded)
+            else:
+                choices = inventory.choose(state, args.enable, args.exclude, read(args.file) if args.file else None)
+        print("Saved " + str(sum(c['enabled'] for c in choices['choices'].values())) + " selected targets; nothing was updated.")
+        return 0
     if args.command in ("run", "preview"):
         return run(state, args.command == "preview")
     if args.command in ("status", "watchdog"):
@@ -309,8 +357,11 @@ def main():
             print(json.dumps(report, indent=2))
         return 0 if report["status"] == "engine_completed" else 1
     cfg = read(state / "config.json")
-    if args.command == "schedule" and (not cfg.get("coverage_reviewed") or not cfg.get("only")):
-        raise RuntimeError("Review coverage and enroll explicit Topgrade steps before scheduling")
+    if args.command == "schedule":
+        import ksu_inventory as inventory
+        selection = inventory.plan(state, restart_policy=cfg["restart_policy"])
+        if not selection["actions"] or selection["blocked"]:
+            raise RuntimeError("Save supported selections and resolve blocked selected targets before scheduling")
     install_scheduler(state, cfg, args.command == "unschedule")
     return 0
 
