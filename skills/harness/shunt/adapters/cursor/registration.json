@@ -1,0 +1,19 @@
+{
+  "format": "hooks-v1",
+  "events": {
+    "preToolUse": [
+      {
+        "command": "{{SCRIPT:pre_tool_use_read.py}}",
+        "matcher": "Read|Shell",
+        "failClosed": false
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "{{SCRIPT:before_shell_execution.py}}",
+        "matcher": "\\b(cat|head|tail)\\b",
+        "failClosed": false
+      }
+    ]
+  }
+}

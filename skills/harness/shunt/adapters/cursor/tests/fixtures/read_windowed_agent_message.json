@@ -1,0 +1,12 @@
+{
+  "hook_event_name": "preToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "__SAMPLE_OVERSIZED__",
+    "offset": null,
+    "limit": null
+  },
+  "agent_message": "Read lines 10 to 50 of the oversized sample for a scoped window.",
+  "cwd": "/tmp",
+  "_expect": "deny — PKG1: do not allow from agent_message when offset/limit stripped"
+}

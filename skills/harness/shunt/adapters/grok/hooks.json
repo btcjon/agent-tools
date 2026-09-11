@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|read_file|Bash|run_terminal_command|Shell|run_terminal_cmd",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__SHUNT_ROOT__/adapters/grok/pretooluse.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

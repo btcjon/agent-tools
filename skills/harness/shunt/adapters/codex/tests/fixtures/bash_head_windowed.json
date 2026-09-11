@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "head -n 20 __SAMPLE_OVERSIZED__"
+  },
+  "cwd": "/tmp"
+}

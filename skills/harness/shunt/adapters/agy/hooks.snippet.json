@@ -1,0 +1,16 @@
+{
+  "shunt": {
+    "PreToolUse": [
+      {
+        "matcher": "read_file|Read|view_file|run_command|Bash|Shell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__SHUNT_ROOT__/adapters/agy/pretooluse.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,31 @@
+# shunt defaults — override with env where noted
+
+[gate]
+# Minimum line count before bulk-read is allowed (else prefer normal read).
+min_lines = 350
+# Soft byte threshold; files under this may still be blocked if other rules say so.
+max_bytes = 524288
+# Paths matching these globs are never sent to bulk-read.
+block_globs = [
+  "**/.env",
+  "**/.env.*",
+  "**/secrets/**",
+  "**/*credential*",
+  "**/*.pem",
+  "**/*.key",
+]
+
+[openrouter]
+# LOCKED — do not substitute CAPI / gflash / Google OAuth Flash.
+base_url = "https://openrouter.ai/api/v1"
+model = "google/gemini-3.8-flash"
+# POST {base_url}/chat/completions
+timeout_seconds = 60
+# Max encoded JSON request body size (chars/bytes of payload).
+max_payload_bytes = 400000
+# API key from env OPENROUTER_API_KEY only.
+# Recursion: SHUNT_INTERNAL=1 skips network (no nested bulk-read).
+
+[output]
+# Cheap model returns POINTS only (bullets, names, paths, line ranges, coverage).
+mode = "points_only"

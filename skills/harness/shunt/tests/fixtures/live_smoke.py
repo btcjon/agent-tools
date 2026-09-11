@@ -1,0 +1,360 @@
+class Widget0:
+    def run(self):
+        return 0
+class Widget1:
+    def run(self):
+        return 1
+class Widget2:
+    def run(self):
+        return 2
+class Widget3:
+    def run(self):
+        return 3
+class Widget4:
+    def run(self):
+        return 4
+class Widget5:
+    def run(self):
+        return 5
+class Widget6:
+    def run(self):
+        return 6
+class Widget7:
+    def run(self):
+        return 7
+class Widget8:
+    def run(self):
+        return 8
+class Widget9:
+    def run(self):
+        return 9
+class Widget10:
+    def run(self):
+        return 10
+class Widget11:
+    def run(self):
+        return 11
+class Widget12:
+    def run(self):
+        return 12
+class Widget13:
+    def run(self):
+        return 13
+class Widget14:
+    def run(self):
+        return 14
+class Widget15:
+    def run(self):
+        return 15
+class Widget16:
+    def run(self):
+        return 16
+class Widget17:
+    def run(self):
+        return 17
+class Widget18:
+    def run(self):
+        return 18
+class Widget19:
+    def run(self):
+        return 19
+class Widget20:
+    def run(self):
+        return 20
+class Widget21:
+    def run(self):
+        return 21
+class Widget22:
+    def run(self):
+        return 22
+class Widget23:
+    def run(self):
+        return 23
+class Widget24:
+    def run(self):
+        return 24
+class Widget25:
+    def run(self):
+        return 25
+class Widget26:
+    def run(self):
+        return 26
+class Widget27:
+    def run(self):
+        return 27
+class Widget28:
+    def run(self):
+        return 28
+class Widget29:
+    def run(self):
+        return 29
+class Widget30:
+    def run(self):
+        return 30
+class Widget31:
+    def run(self):
+        return 31
+class Widget32:
+    def run(self):
+        return 32
+class Widget33:
+    def run(self):
+        return 33
+class Widget34:
+    def run(self):
+        return 34
+class Widget35:
+    def run(self):
+        return 35
+class Widget36:
+    def run(self):
+        return 36
+class Widget37:
+    def run(self):
+        return 37
+class Widget38:
+    def run(self):
+        return 38
+class Widget39:
+    def run(self):
+        return 39
+class Widget40:
+    def run(self):
+        return 40
+class Widget41:
+    def run(self):
+        return 41
+class Widget42:
+    def run(self):
+        return 42
+class Widget43:
+    def run(self):
+        return 43
+class Widget44:
+    def run(self):
+        return 44
+class Widget45:
+    def run(self):
+        return 45
+class Widget46:
+    def run(self):
+        return 46
+class Widget47:
+    def run(self):
+        return 47
+class Widget48:
+    def run(self):
+        return 48
+class Widget49:
+    def run(self):
+        return 49
+class Widget50:
+    def run(self):
+        return 50
+class Widget51:
+    def run(self):
+        return 51
+class Widget52:
+    def run(self):
+        return 52
+class Widget53:
+    def run(self):
+        return 53
+class Widget54:
+    def run(self):
+        return 54
+class Widget55:
+    def run(self):
+        return 55
+class Widget56:
+    def run(self):
+        return 56
+class Widget57:
+    def run(self):
+        return 57
+class Widget58:
+    def run(self):
+        return 58
+class Widget59:
+    def run(self):
+        return 59
+class Widget60:
+    def run(self):
+        return 60
+class Widget61:
+    def run(self):
+        return 61
+class Widget62:
+    def run(self):
+        return 62
+class Widget63:
+    def run(self):
+        return 63
+class Widget64:
+    def run(self):
+        return 64
+class Widget65:
+    def run(self):
+        return 65
+class Widget66:
+    def run(self):
+        return 66
+class Widget67:
+    def run(self):
+        return 67
+class Widget68:
+    def run(self):
+        return 68
+class Widget69:
+    def run(self):
+        return 69
+class Widget70:
+    def run(self):
+        return 70
+class Widget71:
+    def run(self):
+        return 71
+class Widget72:
+    def run(self):
+        return 72
+class Widget73:
+    def run(self):
+        return 73
+class Widget74:
+    def run(self):
+        return 74
+class Widget75:
+    def run(self):
+        return 75
+class Widget76:
+    def run(self):
+        return 76
+class Widget77:
+    def run(self):
+        return 77
+class Widget78:
+    def run(self):
+        return 78
+class Widget79:
+    def run(self):
+        return 79
+class Widget80:
+    def run(self):
+        return 80
+class Widget81:
+    def run(self):
+        return 81
+class Widget82:
+    def run(self):
+        return 82
+class Widget83:
+    def run(self):
+        return 83
+class Widget84:
+    def run(self):
+        return 84
+class Widget85:
+    def run(self):
+        return 85
+class Widget86:
+    def run(self):
+        return 86
+class Widget87:
+    def run(self):
+        return 87
+class Widget88:
+    def run(self):
+        return 88
+class Widget89:
+    def run(self):
+        return 89
+class Widget90:
+    def run(self):
+        return 90
+class Widget91:
+    def run(self):
+        return 91
+class Widget92:
+    def run(self):
+        return 92
+class Widget93:
+    def run(self):
+        return 93
+class Widget94:
+    def run(self):
+        return 94
+class Widget95:
+    def run(self):
+        return 95
+class Widget96:
+    def run(self):
+        return 96
+class Widget97:
+    def run(self):
+        return 97
+class Widget98:
+    def run(self):
+        return 98
+class Widget99:
+    def run(self):
+        return 99
+class Widget100:
+    def run(self):
+        return 100
+class Widget101:
+    def run(self):
+        return 101
+class Widget102:
+    def run(self):
+        return 102
+class Widget103:
+    def run(self):
+        return 103
+class Widget104:
+    def run(self):
+        return 104
+class Widget105:
+    def run(self):
+        return 105
+class Widget106:
+    def run(self):
+        return 106
+class Widget107:
+    def run(self):
+        return 107
+class Widget108:
+    def run(self):
+        return 108
+class Widget109:
+    def run(self):
+        return 109
+class Widget110:
+    def run(self):
+        return 110
+class Widget111:
+    def run(self):
+        return 111
+class Widget112:
+    def run(self):
+        return 112
+class Widget113:
+    def run(self):
+        return 113
+class Widget114:
+    def run(self):
+        return 114
+class Widget115:
+    def run(self):
+        return 115
+class Widget116:
+    def run(self):
+        return 116
+class Widget117:
+    def run(self):
+        return 117
+class Widget118:
+    def run(self):
+        return 118
+class Widget119:
+    def run(self):
+        return 119

@@ -14,6 +14,10 @@ skill in that class lands. Do not dump new skills at the repo root.
 | [KSU — Keep Shit Updated](skills/devops/ksu/) | devops | Discover harnesses, packages and skills; choose exact targets per machine; run quiet nightly maintenance with source protections. |
 | [proactive-skill-suggestor](skills/discovery/proactive-skill-suggestor/) | discovery | High-bar Skills Hub scout from recent Hermes work. Suggest-only. Upgrade similar local skills instead of installing duplicates. |
 | [gmail-triage](skills/email/gmail-triage/) | email | Portable Gmail triage, sender cleanup, unsubscribe, undo, and mailbox health through Composio-managed authentication. |
+| [shunt](skills/harness/shunt/) | harness | Gate oversized file reads; OpenRouter `google/gemini-3.8-flash` returns points-only so the main model decides/edits. Shared core + thin harness adapters. |
+
+Related (separate repository — install from there, not mirrored here):
+[herdr-orchestration](https://github.com/btcjon/herdr-orchestration) — portable Herdr coordinator policy (Astra-main / Sol-main / Auto-main).
 
 ## Install (Hermes)
 
@@ -21,9 +25,12 @@ skill in that class lands. Do not dump new skills at the repo root.
 git clone https://github.com/btcjon/custom-skills.git
 ln -s "$(pwd)/custom-skills/skills/discovery/proactive-skill-suggestor" \
   ~/.hermes/skills/proactive-skill-suggestor
+# Optional: oversized-read gate CLI + adapters
+ln -sfn "$(pwd)/custom-skills/skills/harness/shunt" ~/.hermes/skills/shunt
 ```
 
 Load with `skill_view(name="proactive-skill-suggestor")` in a new session.
+For shunt: install the CLI from `skills/harness/shunt` (`pip install -e ".[dev]"`), then `shunt doctor` / `shunt install` (see that package README).
 
 For Gmail Triage, link or copy `skills/email/gmail-triage` into the skill
 directory used by your agent, then connect Gmail through Composio. The agent needs

@@ -1,0 +1,15 @@
+# Merge into ~/.hermes/config.yaml under top-level `hooks:`.
+# Preserve unrelated hook entries. Prefer fail_closed for policy.
+#
+# hooks:
+#   pre_tool_call:
+#     - command: "<SHUNT_ROOT>/adapters/hermes/pre_tool_call.sh"
+#       timeout: 10
+#       fail_closed: true
+#       matcher: "read|bash|shell|terminal|run_command|cat"
+
+hooks:
+  pre_tool_call:
+    - command: "__SHUNT_ROOT__/adapters/hermes/pre_tool_call.sh"
+      timeout: 10
+      fail_closed: true

@@ -1,0 +1,28 @@
+{
+  "format": "hooks-v1",
+  "events": {
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{SCRIPT:pre_tool_use.py}}",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{SCRIPT:pre_tool_use.py}}",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  },
+  "notes": "shunt-pretool.sh is a thin bash wrapper kept for WP2 path compatibility; install uses pre_tool_use.py."
+}

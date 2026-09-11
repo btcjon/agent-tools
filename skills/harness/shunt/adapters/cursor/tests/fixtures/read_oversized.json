@@ -1,0 +1,10 @@
+{
+  "hook_event_name": "preToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+    "path": "__SAMPLE_OVERSIZED__",
+    "offset": null,
+    "limit": null
+  },
+  "cwd": "/tmp"
+}
