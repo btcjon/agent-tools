@@ -19,6 +19,8 @@ Polled `docs/` (~60s) until PKG1–5 signals present:
 3. Warehouse `AI-Control-Plane/skills/exported/shunt/SKILL.md` already points at custom-skills (unchanged)  
 4. `ln -sfn …/skills/harness/shunt ~/.hermes/skills/shunt`  
 5. Git commit + push authorized scope: `skills/harness/`, `README.md`  
+   - Commit: `eda16dd21175e12c7c7c8a3d978798f378606b02`  
+   - Remote: `origin/main` matches (`git ls-remote` verified)  
 6. Pytest before ship: **42 passed**
 
 ## Residuals carried into ACCEPTANCE-LIVE
