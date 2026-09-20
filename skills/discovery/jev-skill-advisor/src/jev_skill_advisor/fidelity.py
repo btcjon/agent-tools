@@ -78,7 +78,7 @@ _PROTECTED_INLINE = re.compile(r"(`+)[^`]*\1|\[[^\]]*\]\([^)]*\)")
 def _notion_autolinks(text):
     extensions=r"(?:py|sh|js|ts|tsx|jsx|md|txt|json|ya?ml|toml|html?|css)"
     text=re.sub(rf"([A-Za-z0-9_./-]*?)\[([A-Za-z0-9_.-]+\.{extensions})\]\(http://\2\)",lambda m:m.group(1)+m.group(2),text)
-    return text.replace(r"\~","~")
+    return re.sub(r"\\([~$>])",r"\1",text)
 
 
 def _inline(text):

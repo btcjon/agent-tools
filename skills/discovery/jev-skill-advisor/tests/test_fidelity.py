@@ -73,8 +73,8 @@ def test_accepts_txt_fence_label_with_exact_code():
 
 
 def test_accepts_notion_filename_autolinks_and_escaped_home_marker():
-    expected=EXPECTED.replace("Do **not** change", "Use generic_tool_loop.py and ~/.agents/config. Do **not** change")
-    actual=NORMALIZED.replace("Do not change", "Use generic_tool_[loop.py](http://loop.py) and \\~/.agents/config. Do not change")
+    expected=EXPECTED.replace("Do **not** change", "Use generic_tool_loop.py and ~/.agents/config for $5 -> done. Do **not** change")
+    actual=NORMALIZED.replace("Do not change", "Use generic_tool_[loop.py](http://loop.py) and \\~/.agents/config for \\$5 -\\> done. Do not change")
     compare_markdown(expected,actual,title="sample-skill")
 
 
