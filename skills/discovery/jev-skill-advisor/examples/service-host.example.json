@@ -1,0 +1,20 @@
+{
+  "config_version": 1,
+  "profile_id": "codex-shadow-example",
+  "harness": "codex",
+  "warehouse_root": "/absolute/path/to/AI-Control-Plane/skills/exported",
+  "catalog_path": "/absolute/path/to/reviewed-routing-catalog.json",
+  "state_dir": "/absolute/host-local/state/jev-skill-advisor",
+  "mode": "shadow",
+  "provider_enabled": true,
+  "read_enabled": false,
+  "eligible_ids": ["warehouse:example"],
+  "read_allowlist": [],
+  "credential_env": "TYPESAFE_API_KEY",
+  "deadline_s": 5,
+  "max_calls": 32,
+  "max_tokens": 200000,
+  "receipt_ttl_s": 86400
+  ,"prompt_limit": 20
+  ,"provider_attempt_limit": 160
+}

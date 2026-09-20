@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Jev Skill Advisor Service v1",
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/suggest"},
+    {"$ref": "#/$defs/read"},
+    {"$ref": "#/$defs/outcome"}
+  ],
+  "$defs": {
+    "suggest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["protocol_version", "request_id", "session_id", "task"],
+      "properties": {
+        "protocol_version": {"const": 1}, "request_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "session_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "task": {"type": "string", "minLength": 1, "maxLength": 8000}, "context": {"type": "string", "maxLength": 2000},
+        "explicit_skills": {"type": "array", "maxItems": 5, "items": {"type": "string"}},
+        "available_ids": {"type": "array", "maxItems": 256, "items": {"type": "string"}}
+      }
+    },
+    "read": {
+      "type": "object", "additionalProperties": false,
+      "required": ["protocol_version", "session_id", "receipt_id", "skill_id", "expected_content_hash"],
+      "properties": {"protocol_version": {"const": 1}, "session_id": {"type": "string"}, "receipt_id": {"type": "string"}, "skill_id": {"type": "string"}, "expected_content_hash": {"type": "string"}}
+    },
+    "outcome": {
+      "type": "object", "additionalProperties": false,
+      "required": ["protocol_version", "session_id", "receipt_id", "event_id", "skill_id", "outcome", "evidence"],
+      "properties": {"protocol_version": {"const": 1}, "session_id": {"type": "string"}, "receipt_id": {"type": "string"}, "event_id": {"type": "string"}, "skill_id": {"type": "string"}, "outcome": {"enum": ["read", "applied", "dismissed", "blocked"]}, "evidence": {"enum": ["host_observed", "self_reported"]}, "reason_code": {"type": ["string", "null"]}}
+    }
+  }
+}
