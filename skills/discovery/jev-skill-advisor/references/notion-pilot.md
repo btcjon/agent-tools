@@ -1,8 +1,8 @@
 # Notion read-only pilot
 
-Use this pilot to prove Notion Agent Skills export fidelity before changing any harness or canonical authority.
+Use this workflow to prove Notion Agent Skills export fidelity before changing any harness or canonical authority. Begin with a small pilot; after it passes, the same importer accepts up to 1,024 explicitly listed exports.
 
-Create a host-local JSON configuration containing an absolute `state_dir` and one to five explicitly approved, non-sensitive exports that contain three to five total skills:
+Create a host-local JSON configuration containing an absolute `state_dir` and explicitly approved, non-sensitive exports. Keep the first validation to one to five exports containing three to five total skills; expand the allowlist only after that validation passes:
 
 ```json
 {
@@ -41,7 +41,25 @@ After creation, run `verify --cache-root /absolute/notion-library`. Verification
 
 Notion may serialize equivalent Markdown differently. Verification uses a versioned structural comparator rather than weakening the approved source: it recognizes only documented Notion normalizations for blank lines, a title-matching leading H1, list indentation and continuation wrappers, GFM/Notion tables, formatting wrappers, and `text`/`plain text`/`txt` fence labels. Instruction text, headings, list nesting, table cells, links, code, and duplicate-key-rejected preserved YAML metadata must remain equivalent. The audit receipt records both raw hashes and every normalization rule used for each page and exported skill.
 
-This pilot does not change the canonical warehouse, install imported skills into a harness, execute exported MCP configuration, retire symlinks, or grant broader Notion access.
+Importing does not execute exported MCP configuration, retire symlinks, or grant broader Notion access. Harness activation is a separate profile/configuration change and must point at an immutable, verified snapshot.
+
+## Portable skill packages
+
+An export may contain a legacy `SKILL.md` or one or more nested skill packages. Put an optional `skill-package.json` beside each package entrypoint:
+
+```json
+{
+  "schema_version": 1,
+  "stable_id": "company:skill-name",
+  "aliases": ["warehouse:old-name"],
+  "entrypoint": "SKILL.md",
+  "invocation_policy": "implicit",
+  "required_runtimes": ["python3"],
+  "executable_paths": ["scripts/check.py"]
+}
+```
+
+All files below that package root travel with it, including referenced documentation and scripts. The cache preserves ordinary versus executable file mode, validates every path and content hash, and rejects duplicate stable IDs or aliases. A harness receives the selected entrypoint plus the verified package root so it can progressively open referenced resources without loading the rest of the library.
 
 ## Jev shadow evaluation
 

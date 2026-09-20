@@ -2,6 +2,7 @@ from test_service import ServiceTests
 from jev_skill_advisor.context import prepare_context
 import pytest
 import sqlite3
+from pathlib import Path
 
 
 class ContextTests(ServiceTests):
@@ -11,6 +12,8 @@ class ContextTests(ServiceTests):
         self.assertEqual(len(result["skills"]), 1)
         self.assertIn("BODY_alpha", result["skills"][0]["body"])
         self.assertNotIn("BODY_beta", result["skills"][0]["body"])
+        self.assertTrue(result["skills"][0]["canonical_path"].endswith("SKILL.md"))
+        self.assertEqual(Path(result["skills"][0]["package_root"]), (self.warehouse / "alpha").resolve())
 
     def test_prepare_context_falls_back_when_body_is_not_readable(self):
         result = prepare_context(self.service, task="use beta procedure", harness="test", session_id="ctx",

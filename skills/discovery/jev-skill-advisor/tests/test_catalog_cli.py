@@ -1,5 +1,5 @@
 from __future__ import annotations
-import tempfile, unittest
+import json, tempfile, unittest
 from pathlib import Path
 from jev_skill_advisor.catalog_cli import build_catalog
 
@@ -49,5 +49,17 @@ class CatalogTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError,"warehouse_not_directory"):
                 build_catalog(Path(directory)/"missing")
+
+    def test_package_manifest_controls_identity_entrypoint_policy_aliases_and_runtimes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory); package=root/"opaque"; entry=package/"instructions"/"MAIN.md"; entry.parent.mkdir(parents=True)
+            entry.write_text("---\nname: portable\ndescription: Portable package.\n---\nUse ../references/detail.md\n")
+            (package/"skill-package.json").write_text(json.dumps({"schema_version":1,"stable_id":"shared:portable",
+                "aliases":["warehouse:portable"],"entrypoint":"instructions/MAIN.md","invocation_policy":"explicit",
+                "required_runtimes":["python3"]}))
+            result=build_catalog(root); row=result["entries"][0]
+            self.assertEqual(row["stable_id"],"shared:portable"); self.assertEqual(row["relative_path"],"opaque")
+            self.assertEqual(row["entrypoint"],"instructions/MAIN.md"); self.assertFalse(row["implicit_eligible"])
+            self.assertEqual(row["aliases"],["warehouse:portable"]); self.assertEqual(row["required_runtimes"],["python3"])
 
 if __name__=="__main__": unittest.main()

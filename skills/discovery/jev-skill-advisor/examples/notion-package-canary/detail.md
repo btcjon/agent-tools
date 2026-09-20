@@ -1,0 +1,3 @@
+# Package resource canary
+
+RESOURCE_SENTINEL_NOTION_20260920

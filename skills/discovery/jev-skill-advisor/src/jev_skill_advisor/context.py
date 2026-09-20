@@ -4,6 +4,7 @@ from __future__ import annotations
 import uuid
 import re
 import sqlite3
+from pathlib import Path
 
 FIELDS = {"task", "harness", "session_id", "available_ids", "explicit_skills", "max_body_bytes"}
 
@@ -46,6 +47,7 @@ def prepare_context(service, *, task, harness, session_id, available_ids=None,
         return native_fallback()
     result = {"protocol_version": 1, "status": suggestion["status"],
               "reason": suggestion["reason"], "receipt_id": suggestion["receipt_id"],
+              "catalog_hash": suggestion.get("catalog_hash"), "policy_hash": suggestion.get("policy_hash"),
               "selected_ids": [], "skills": [], "body_bytes": 0,
               "telemetry": suggestion.get("telemetry", {}), "fallback": None}
     if suggestion["status"] not in {"suggested", "explicit_selection"}:
@@ -69,7 +71,9 @@ def prepare_context(service, *, task, harness, session_id, available_ids=None,
             return result
         result["selected_ids"].append(sid)
         result["skills"].append({"id": sid, "name": card["name"], "content_hash": read["content_hash"],
-                                 "body": read["body"], "body_bytes": read["body_bytes"]})
+                                 "body": read["body"], "body_bytes": read["body_bytes"],
+                                 "canonical_path": read["canonical_path"],
+                                 "package_root": read["package_root"]})
         result["body_bytes"] += read["body_bytes"]
     if not result["skills"]:
         result.update(status="none", reason="no_readable_selection", fallback="native_discovery")

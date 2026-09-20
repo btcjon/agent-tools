@@ -11,8 +11,8 @@ from .notion_import import NotionExportClient
 def _config(path):
     value = json.loads(path.read_text(encoding="utf-8"))
     allowlist = value.get("allowlist")
-    if not isinstance(allowlist, list) or not 1 <= len(allowlist) <= 5:
-        raise ValueError("allowlist_requires_1_to_5_exports")
+    if not isinstance(allowlist, list) or not 1 <= len(allowlist) <= 1024:
+        raise ValueError("allowlist_requires_1_to_1024_exports")
     entries = []
     for row in allowlist:
         if not isinstance(row, dict) or set(row) != {"kind", "id"} or row["kind"] not in {"skill", "plugin"} or not isinstance(row["id"], str):

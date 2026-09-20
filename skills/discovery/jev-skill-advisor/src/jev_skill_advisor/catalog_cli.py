@@ -37,21 +37,40 @@ def _metadata_text(value,key):
 def build_catalog(warehouse):
     if not warehouse.exists() or not warehouse.is_dir(): raise ValueError("warehouse_not_directory")
     warehouse=warehouse.resolve(); entries=[]; exclusions=[]
-    try: sources=sorted(warehouse.glob("**/SKILL.md"))
+    try:
+        package_dirs={path.parent for path in warehouse.glob("*/skill-package.json")}
+        packaged_sources=[]
+        package_meta={}
+        for root in sorted(package_dirs):
+            value=json.loads((root/"skill-package.json").read_text(encoding="utf-8"))
+            entry=Path(value.get("entrypoint", ""))
+            if entry.is_absolute() or ".." in entry.parts: raise ValueError("invalid_package_entrypoint")
+            source=root/entry
+            if not source.is_file(): raise ValueError("invalid_package_entrypoint")
+            packaged_sources.append(source); package_meta[source]=(root,value)
+        sources=sorted(packaged_sources + [source for source in warehouse.glob("**/SKILL.md")
+                                           if not any(root == source.parent or root in source.parents for root in package_dirs)])
     except OSError as exc: raise ValueError("warehouse_inventory_unreadable") from exc
     for source in sources:
-        rel=source.parent.relative_to(warehouse).as_posix(); stable_id=f"warehouse:{rel}"
+        package_record=package_meta.get(source); package_root,package=package_record if package_record else (source.parent,None)
+        rel=package_root.relative_to(warehouse).as_posix()
+        stable_id=package.get("stable_id") if package else f"warehouse:{rel}"
         try:
             if source.is_symlink() or warehouse not in source.resolve().parents: raise ValueError("symlink_or_path_escape")
             try: raw=source.read_bytes()
             except OSError as exc: raise ValueError("warehouse_inventory_unreadable") from exc
             meta=frontmatter(raw.decode("utf-8",errors="replace")); name=_metadata_text(meta.get("name"),"name"); description=_metadata_text(meta.get("description"),"description")
-            implicit,policy_hash=current_policy(source)
+            implicit,policy_hash=current_policy(source,package_root)
+            invocation_policy=package.get("invocation_policy","source") if package else "source"
+            aliases=package.get("aliases",[]) if package else []
+            runtimes=package.get("required_runtimes",[]) if package else []
             if description.lower().startswith("[hermes control: disabled]") or "jb-disabled route" in description.lower():
                 exclusions.append({"stable_id":stable_id,"relative_path":rel,"reason":"explicitly_disabled","name":name,"description":description,"content_hash":hashlib.sha256(raw).hexdigest(),"policy_hash":policy_hash}); continue
             protected=any(marker in description.lower() for marker in ("typesafe_api_key=","jev_api=","authorization: bearer","-----begin "))
             entries.append({"stable_id":stable_id,"name":name,"description":description,"relative_path":rel,
                 "content_hash":hashlib.sha256(raw).hexdigest(),"policy_hash":policy_hash,"implicit_eligible":implicit,
+                "aliases":aliases,"invocation_policy":invocation_policy,"required_runtimes":runtimes,
+                "entrypoint":source.relative_to(package_root).as_posix(),"package_root":rel,
                 "provider_disclosure_eligible":implicit and not protected,"provider_exclusion_reason":"protected_description" if protected else ("explicit_only" if not implicit else None),
                 "compatibility":{"agent_skills_structure":True,"declared_harnesses":[],"undeclared_harness_compatibility":"unknown"},"review_status":"canonical_source_metadata"})
         except ValueError as exc:

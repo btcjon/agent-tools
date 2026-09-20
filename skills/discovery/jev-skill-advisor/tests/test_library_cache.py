@@ -13,11 +13,11 @@ from jev_skill_advisor.library_cache import LibraryCache, LibraryCacheError, _ar
 from jev_skill_advisor.notion_import import Export
 
 
-def archive(files, *, link=None):
+def archive(files, *, link=None, modes=None):
     output=io.BytesIO()
     with tarfile.open(fileobj=output,mode="w:gz") as bundle:
         for name,data in files.items():
-            info=tarfile.TarInfo(name); info.size=len(data); bundle.addfile(info,io.BytesIO(data))
+            info=tarfile.TarInfo(name); info.size=len(data); info.mode=(modes or {}).get(name,0o644); bundle.addfile(info,io.BytesIO(data))
         if link:
             info=tarfile.TarInfo(link); info.type=tarfile.SYMTYPE; info.linkname="/tmp/out"; bundle.addfile(info)
     return output.getvalue()
@@ -62,15 +62,16 @@ class LibraryCacheTests(unittest.TestCase):
             with self.assertRaisesRegex(LibraryCacheError,"unsafe_archive_path"): cache.publish([export(1),export(2),bad])
             self.assertEqual(cache.status()["snapshot_id"],first["snapshot_id"])
 
-    def test_links_missing_skill_duplicates_and_pilot_size_are_rejected(self):
+    def test_links_missing_skill_duplicates_and_configured_bounds_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             cache=LibraryCache(Path(directory)/"cache")
             linked=Export("skill","linked","c"*64,archive({"p/a/SKILL.md":b"x"},link="p/a/link"))
             with self.assertRaisesRegex(LibraryCacheError,"unsupported_archive_entry"): cache.publish([export(1),export(2),linked])
             missing=Export("skill","missing","d"*64,archive({"p/a/readme.txt":b"x"}))
             with self.assertRaisesRegex(LibraryCacheError,"missing_skill_md"): cache.publish([export(1),export(2),missing])
-            with self.assertRaisesRegex(LibraryCacheError,"pilot_requires_3_to_5_skills"): cache.publish([export(1),export(2)])
             with self.assertRaisesRegex(LibraryCacheError,"duplicate_export"): cache.publish([export(1),export(1),export(2)])
+            bounded=LibraryCache(Path(directory)/"bounded",max_exports=2,max_skills=2)
+            with self.assertRaisesRegex(LibraryCacheError,"export_count_out_of_bounds"): bounded.publish([export(1),export(2),export(3)])
 
     def test_same_version_with_changed_content_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -135,6 +136,44 @@ class LibraryCacheTests(unittest.TestCase):
             self.assertEqual([kind for kind,_ in outcomes].count("ok"),1)
             self.assertEqual([value for kind,value in outcomes if kind=="error"],["content_changed_without_version_change"])
             self.assertEqual(cache.status()["status"],"ready")
+
+    def test_versioned_package_manifest_nested_roots_and_executable_modes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            package={"schema_version":1,"stable_id":"shared:outer","aliases":["warehouse:old-outer"],
+                     "entrypoint":"SKILL.md","invocation_policy":"implicit","required_runtimes":["python3"],
+                     "executable_paths":["scripts/check.sh"]}
+            nested={"schema_version":1,"stable_id":"shared:nested","entrypoint":"SKILL.md",
+                    "invocation_policy":"explicit","required_runtimes":[]}
+            files={"bundle/outer/SKILL.md":b"---\nname: outer\ndescription: Outer.\n---\nSee scripts/check.sh\n",
+                   "bundle/outer/skill-package.json":json.dumps(package).encode(),
+                   "bundle/outer/scripts/check.sh":b"#!/bin/sh\nprintf package-ok\n",
+                   "bundle/outer/nested/SKILL.md":b"---\nname: nested\ndescription: Nested.\n---\n",
+                   "bundle/outer/nested/skill-package.json":json.dumps(nested).encode()}
+            payload=Export("plugin","plugin-1","a"*64,archive(files,modes={"bundle/outer/scripts/check.sh":0o755}))
+            status=LibraryCache(Path(directory)/"cache").publish([payload])
+            root=Path(status["catalog_root"]); manifest=json.loads((root.parent/"manifest.json").read_text())
+            self.assertEqual({row["stable_id"] for row in manifest["packages"]},{"shared:outer","shared:nested"})
+            destinations={row["stable_id"]:row["destination"] for row in manifest["packages"]}
+            outer=root/destinations["shared:outer"]; nested=root/destinations["shared:nested"]
+            self.assertEqual((outer/"scripts"/"check.sh").read_bytes(),files["bundle/outer/scripts/check.sh"])
+            self.assertTrue((outer/"scripts"/"check.sh").stat().st_mode & 0o111)
+            self.assertEqual((outer/"nested"/"SKILL.md").read_bytes(),files["bundle/outer/nested/SKILL.md"])
+            self.assertEqual((nested/"SKILL.md").read_bytes(),files["bundle/outer/nested/SKILL.md"])
+
+    def test_explicit_stable_identity_survives_source_directory_rename(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest={"schema_version":1,"stable_id":"shared:stable","entrypoint":"SKILL.md",
+                      "invocation_policy":"implicit"}
+            def item(folder,version):
+                files={f"p/{folder}/SKILL.md":b"---\nname: stable\ndescription: Stable.\n---\n",
+                       f"p/{folder}/skill-package.json":json.dumps(manifest).encode()}
+                return Export("skill","page-stable",version,archive(files))
+            cache=LibraryCache(Path(directory)/"cache")
+            first=cache.publish([item("before","a"*64)])
+            second=cache.publish([item("after","b"*64)])
+            for snapshot in (first,second):
+                data=json.loads((cache.snapshots/snapshot["snapshot_id"]/"manifest.json").read_text())
+                self.assertEqual(data["packages"][0]["stable_id"],"shared:stable")
 
 
 if __name__ == "__main__": unittest.main()

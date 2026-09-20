@@ -18,7 +18,7 @@ That keeps giant catalogs out of the main model context while preserving the bou
 
 ## How it works
 
-1. **Catalog:** inventory `SKILL.md` files and record stable IDs plus source and policy hashes.
+1. **Catalog:** inventory `SKILL.md` files or verified Notion skill packages and record stable IDs plus source, package, and policy hashes.
 2. **Suggest:** rank only skills the calling harness says are available.
 3. **Read and report:** permit the selected hash-bound read, then record the outcome for evaluation.
 
@@ -37,7 +37,7 @@ uv run --with-editable . skill-advisor-service \
   --config /path/to/profile.json suggest < request.json
 ```
 
-Start with [`TRY_IT.md`](TRY_IT.md). For harness wiring, read [`HARNESS_INTEGRATION.md`](HARNESS_INTEGRATION.md).
+Start with [`TRY_IT.md`](TRY_IT.md). For harness wiring, read [`references/harness-integration.md`](references/harness-integration.md).
 
 ## Safe operating boundary
 

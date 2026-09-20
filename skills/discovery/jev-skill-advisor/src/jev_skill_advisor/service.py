@@ -158,7 +158,7 @@ class SkillAdvisorService:
         binding = receipt.get("bindings", {}).get(sid)
         if not binding or data["expected_content_hash"] != binding.get("content_hash"):
             return {"protocol_version": 1, "status": "stale", "receipt_id": data["receipt_id"], "skill_id": sid, "advisory_only": True}
-        implicit, policy_hash = current_policy(Path(entry.source))
+        implicit, policy_hash = current_policy(Path(entry.source),Path(self.profile.package_roots[sid]))
         if policy_hash != binding.get("policy_hash") or (receipt.get("implicit") and not implicit):
             return {"protocol_version": 1, "status": "stale", "receipt_id": data["receipt_id"], "skill_id": sid, "advisory_only": True}
         raw = Path(entry.source).read_bytes()
@@ -181,7 +181,7 @@ class SkillAdvisorService:
             "event_id": f"read:{sid}", "skill_id": sid, "outcome": "read", "evidence": "host_observed", "reason_code": None})
         return {"protocol_version": 1, "status": "read", "receipt_id": data["receipt_id"], "skill_id": sid,
                 "content_hash": digest, "body": raw.decode("utf-8"), "body_bytes": len(raw),
-                "canonical_path": entry.source, "advisory_only": True}
+                "canonical_path": entry.source, "package_root": self.profile.package_roots[sid], "advisory_only": True}
 
     def report_outcome(self, value):
         data = validate_outcome(value)

@@ -11,7 +11,9 @@ function valid(result, maxBytes) {
   if (!["suggested", "explicit_selection"].includes(result.status) || result.fallback != null) return false;
   const validSkills = result.skills.every((item, index) => item && item.id === result.selected_ids[index]
     && typeof item.body === "string" && typeof item.content_hash === "string"
-    && /^[0-9a-f]{64}$/.test(item.content_hash) && Number.isInteger(item.body_bytes) && Buffer.byteLength(item.body) === item.body_bytes);
+    && /^[0-9a-f]{64}$/.test(item.content_hash) && Number.isInteger(item.body_bytes) && Buffer.byteLength(item.body) === item.body_bytes
+    && typeof item.canonical_path === "string" && item.canonical_path.length > 0
+    && typeof item.package_root === "string" && item.package_root.length > 0);
   return validSkills && result.skills.reduce((sum, item) => sum + item.body_bytes, 0) === result.body_bytes;
 }
 

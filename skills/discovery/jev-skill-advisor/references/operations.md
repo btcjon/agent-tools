@@ -20,3 +20,11 @@ Put the profile under host configuration and use a state directory such as `~/.l
 Use receipt IDs and request/session IDs to correlate the harness's own event log. Keep quality judgments outside the advisor database unless they use the bounded outcome labels. Compare shadow suggestions with the skill actually chosen by the harness and independently judged task quality.
 
 Rollback by stopping the service, preserving the SQLite database and legacy backup, and restoring the prior package revision/profile. Do not delete runtime evidence during rollback.
+
+## Notion-backed library
+
+Use `skill-library inspect` before `pull`. A successful pull creates an immutable, fully hashed snapshot and atomically changes `current.json`; a failed pull leaves the prior selection intact. Build each harness profile against the selected snapshot's absolute `catalog_root`, not a mutable Notion URL or synchronized working directory.
+
+Package metadata in `skill-package.json` controls stable identity, aliases, entrypoint, invocation policy, required runtimes, and executable paths. Missing required runtimes make the package unavailable. Declared executable paths are validated as files inside the package before their executable bit is restored. Referenced resources stay beneath the verified package root and are opened progressively by the harness.
+
+The Codex adapter writes content-free events to `~/.local/state/jev-skill-advisor/codex-adapter/events.jsonl`. Correlate session/turn, snapshot, profile/catalog/policy hashes, selected IDs, receipt, provider attempts, latency, fallback reason, and emitted-context hash. Prompt and skill bodies are deliberately absent.

@@ -13,15 +13,19 @@ Every harness uses the same service contract. The adapter's job is deliberately 
 
 ## Hermes
 
-Hermes should discover this package as a normal global skill, but selection integration should run as a thin hook/plugin or explicit MCP client—not inside `SKILL.md`. No Hermes adapter is installed by this package. Point a Hermes-specific host profile at the canonical warehouse and the reviewed catalog, initialize the local database, and register the stdio MCP command using absolute package and executable paths. Start with manual MCP calls or a separately reviewed shadow hook. Do not disable Hermes `skill_search`/`skill_view`; they remain the fallback and comparison baseline.
+Hermes uses the thin adapter under `skills/harness/hermes-router`. Point its host profile at an immutable verified catalog snapshot. It injects selected bodies before the first model request and retains `skill_search`/`skill_view` as the failure and comparison path.
 
 ## Codex, Claude, Cursor, and other harnesses
 
-Use the same stdio MCP server when the harness supports MCP. Otherwise send versioned JSON to `skill-advisor-service` over stdin and parse its single JSON stdout response. An adapter must provide actual session-visible IDs; it must not claim every warehouse skill is loadable. Use the harness's supported context-injection mechanism only after shadow evaluation passes.
+Use the same stdio MCP server when the harness supports MCP. Otherwise send versioned JSON to `skill-advisor-service` over stdin and parse its single JSON stdout response. An adapter must provide actual session-visible IDs; it must not claim every warehouse skill is loadable.
+
+Codex uses `scripts/codex_skill_hook.py` as the single owned `UserPromptSubmit` command. The adapter validates the event, calls `prepare-context` under a shorter internal deadline than the hook timeout, and emits one bounded `hookSpecificOutput.additionalContext`. It returns empty stdout on failure so native discovery continues. Keep the separate `Stop` observer when outcome telemetry is wanted.
+
+For both adapters, `warehouse_root` may be an immutable Notion Agent Skills cache snapshot. The injected record includes the entrypoint and package root so the agent can progressively open referenced package resources without loading unrelated skills.
 
 ## Activation stages
 
 - **Off:** no Jev call.
 - **Shadow:** Jev suggests and telemetry records; agent behavior is unchanged.
 - **Advisory/manual read:** an operator or adapter may inspect the selected skill.
-- **Automatic injection:** deferred until the shadow pilot meets predefined quality, safety, latency, and savings gates.
+- **Automatic injection:** enabled only for a reviewed host profile and immutable snapshot; native discovery remains the fail-open path.

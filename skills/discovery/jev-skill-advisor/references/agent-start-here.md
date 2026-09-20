@@ -16,7 +16,7 @@ This package lets a harness ask Jev which reviewed skill best fits the current t
 - Create a reviewed catalog covering the intended pilot skills. Presence in the warehouse is not enough.
 - Create one host profile from `examples/service-host.example.json`; use a host-local state directory and credential.
 - Run `skill-advisor-admin ... init-db`, then `doctor`.
-- Keep `mode: shadow`, `read_enabled: false`, and injection off for the first trial.
+- Keep `mode: shadow`, `read_enabled: false`, and injection off for a new harness trial. The checked-in Hermes and Codex adapters have separate reviewed activation evidence; do not treat that as automatic approval for another host.
 
 ## Success evidence
 
