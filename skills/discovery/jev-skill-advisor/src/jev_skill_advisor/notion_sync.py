@@ -20,7 +20,7 @@ from .notion_publish import _split_skill
 from .notion_publish import _exported_skill
 from .notion_import import NotionExportClient,NotionImportError
 from .library_cache import _archive_entries,_package_roots
-from .fidelity import FidelityError
+from .fidelity import FidelityError,compare_markdown
 from .profile import current_policy
 from .sync_ledger import SyncLedger
 
@@ -424,8 +424,14 @@ def _verify_existing(transport,row,page_id,source_data=None,bundle_data=None,man
 
 def execute_sync(inventory,plan,*,ledger_path,run_id=None,transport=None,limit=None,only_ids=None):
     ledger=SyncLedger(ledger_path)
+    run_id=run_id or f"sync-{uuid.uuid4().hex}"
     with ledger.run_lock():
-        return _execute_sync(inventory,plan,ledger=ledger,run_id=run_id,transport=transport,limit=limit,only_ids=only_ids)
+        try:
+            return _execute_sync(inventory,plan,ledger=ledger,run_id=run_id,transport=transport,limit=limit,only_ids=only_ids)
+        except Exception:
+            current=ledger.run(run_id)
+            if current and current["status"]=="running": ledger.finish_run(run_id,"failed")
+            raise
 
 
 def _execute_sync(inventory,plan,*,ledger,run_id=None,transport=None,limit=None,only_ids=None):
@@ -463,6 +469,9 @@ def _execute_sync(inventory,plan,*,ledger,run_id=None,transport=None,limit=None,
                     completed.append({"stable_id":row["stable_id"],"page_id":page_id,"action":kind}); continue
                 if kind!="update" or not marker or marker.get("operation_id")!=operation_id or marker.get("phase")!="pending":
                     raise SyncError("ambiguous_mutation_requires_reconciliation")
+                pending_expected=_page_material(row,operation_id,"pending",source_data=source_data)[2]
+                try: compare_markdown(pending_expected,remote,title=row["name"],profile="page")
+                except FidelityError as exc: raise SyncError("partial_update_content_changed") from exc
             else:
                 ledger.checkpoint_intent(run_id,row["stable_id"],kind,row["desired_hash"],page_id=action.get("page_id")); ledger.record_attempt(run_id,row["stable_id"],kind)
             name,description,markdown=_page_material(row,operation_id,source_data=source_data); uploads=[]

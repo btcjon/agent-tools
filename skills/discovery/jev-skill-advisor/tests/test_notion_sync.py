@@ -224,6 +224,38 @@ def test_partial_update_resumes_without_reuploading_or_rechecking_old_version(tm
     assert [call[0] for call in transport.calls if call[0] in {"markdown","properties"}]==["markdown","properties","markdown"]
 
 
+def test_partial_update_rejects_intervening_human_content_edit(tmp_path):
+    skill(tmp_path,"alpha"); inventory=freeze_inventory(tmp_path); row=inventory["skills"][0]
+    plan=plan_sync(inventory,[{"stable_id":row["stable_id"],"page_id":"page-a","last_synced_hash":"old","remote_hash":"old"}],database_id="db",data_source_id="ds")
+    operation_id="resume:warehouse:alpha"
+    class Edited(FakeTransport):
+        def request(self,path,method="GET",body=None):
+            if path.endswith("/query"): return {"results":[{"id":"page-a"}],"has_more":False}
+            if path.endswith("/markdown"): return {"markdown":_page_material(row,operation_id,"pending")[2]+"\nHuman edit\n"}
+            return {"version_id":"changed"}
+    from jev_skill_advisor.sync_ledger import SyncLedger
+    from jev_skill_advisor.notion_sync import _hash
+    ledger_path=tmp_path/"ledger.sqlite3"; ledger=SyncLedger(ledger_path)
+    binding=_hash({"inventory_hash":inventory["inventory_hash"],"plan_hash":plan["plan_hash"],"database_id":"db","data_source_id":"ds"})
+    destination=_hash({"database_id":"db","data_source_id":"ds"})
+    ledger.create_run("resume",source_snapshot_id=binding,destination_id=destination)
+    ledger.checkpoint_intent("resume",row["stable_id"],"update",row["desired_hash"],page_id="page-a"); ledger.record_attempt("resume",row["stable_id"],"update")
+    transport=Edited()
+    with pytest.raises(SyncError,match="partial_update_content_changed"):
+        execute_sync(inventory,plan,ledger_path=ledger_path,run_id="resume",transport=transport)
+    assert not any(call[0] in {"upload_bytes","markdown","properties"} for call in transport.calls)
+
+
+def test_preflight_failure_marks_run_failed(tmp_path):
+    skill(tmp_path,"alpha"); inventory=freeze_inventory(tmp_path); plan=plan_sync(inventory,[],database_id="db",data_source_id="ds")
+    (tmp_path/"alpha"/"SKILL.md").write_text("changed")
+    ledger_path=tmp_path/"ledger.sqlite3"
+    with pytest.raises(SyncError,match="frozen_source_drift"):
+        execute_sync(inventory,plan,ledger_path=ledger_path,run_id="preflight",transport=FakeTransport())
+    from jev_skill_advisor.sync_ledger import SyncLedger
+    assert SyncLedger(ledger_path).run("preflight")["status"]=="failed"
+
+
 def test_custom_entrypoint_is_explicitly_excluded(tmp_path):
     skill(tmp_path,"alpha"); folder=tmp_path/"alpha"
     (folder/"ALT.md").write_text((folder/"SKILL.md").read_text())

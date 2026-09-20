@@ -162,6 +162,12 @@ class SyncLedger:
             row = db.execute("SELECT * FROM sync_runs WHERE run_id=?", (run_id,)).fetchone()
         return dict(row)
 
+    def run(self, run_id: str) -> dict | None:
+        run_id = _identifier(run_id, "run_id", required=True)
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM sync_runs WHERE run_id=?", (run_id,)).fetchone()
+        return dict(row) if row else None
+
     def checkpoint_intent(
         self, run_id: str, skill_id: str, operation_kind: str, desired_hash: str,
         *, remote_hash: str | None = None, page_id: str | None = None,
