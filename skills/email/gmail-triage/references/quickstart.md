@@ -5,7 +5,7 @@ me connect my Gmail, run the offline demo, then show a read-only sender review."
 
 ## 1. Load the package
 
-Clone https://github.com/btcjon/custom-skills and locate
+Clone https://github.com/btcjon/agent-tools and locate
 `skills/email/gmail-triage`. Load the entire package, including references,
 scripts and fixtures. Use the agent's supported skill installer or project skill
 directory. Do not overwrite an existing installation. If the harness cannot

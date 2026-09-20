@@ -44,7 +44,7 @@ class SkillAdvisorService:
         return {"id": sid, "name": name, "description": entry.description[:400],
                 "content_hash": entry.source_hash, "policy_hash": entry.policy_hash}
 
-    def _response(self, data, status, reason, selected=(), candidates=(), evidence="profile", telemetry=None):
+    def _response(self, data, status, reason, selected=(), candidates=(), evidence="profile", telemetry=None, decision_audit=None):
         receipt_id = self.runtime.new_receipt_id()
         allowed = list(dict.fromkeys([*selected, *candidates]))
         now = time.time()
@@ -57,6 +57,8 @@ class SkillAdvisorService:
                    "telemetry": telemetry,
                    "implicit": status != "explicit_selection", "created_at": iso(now),
                    "expires_at": iso(now + self.profile.receipt_ttl_s), "reads": {}}
+        if decision_audit is not None:
+            receipt["decision_audit"] = decision_audit
         receipt["bindings"] = {sid: {"content_hash": self.profile.entries[sid].source_hash,
                                      "policy_hash": self.profile.entries[sid].policy_hash}
                                for sid in allowed if sid in self.profile.entries}
@@ -67,7 +69,7 @@ class SkillAdvisorService:
                 "candidates": [self._card(sid) for sid in candidates if sid not in selected][:3],
                 "availability_evidence": evidence, "catalog_hash": self.profile.catalog_hash,
                 "policy_hash": self.profile.policy_hash,
-                "telemetry": telemetry,
+                "telemetry": telemetry, **({"decision_audit": decision_audit} if decision_audit is not None else {}),
                 "advisory_only": True}
 
     def suggest(self, value):
@@ -127,7 +129,7 @@ class SkillAdvisorService:
                      "cache_hits": receipt.get("cache_hits", 0), "input_tokens": receipt.get("input_tokens", 0),
                      "unknown_usage": receipt.get("unknown_usage", 0),
                      "elapsed_ms": round((time.monotonic() - started) * 1000, 3)}
-        return self._response(data, status, reason, selected, candidates, evidence, telemetry)
+        return self._response(data, status, reason, selected, candidates, evidence, telemetry, receipt.get("decision_audit"))
 
     def _receipt(self, session_id, receipt_id):
         receipt = self.runtime.load_receipt(receipt_id)

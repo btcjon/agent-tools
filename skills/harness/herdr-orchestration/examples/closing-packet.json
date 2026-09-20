@@ -1,0 +1,23 @@
+{
+  "job_id": "demo-exec-0001",
+  "claim_owner": "coordinator:demo-exec-0001",
+  "outcome": "Add --dry-run to sample CLI",
+  "authorized_scope": ["src/sample_cli/**", "tests/test_main.py"],
+  "approved_plan_summary": "Parse flag early; thread boolean; unittest coverage",
+  "criteria": [
+    {"id": "M1", "mandatory": true, "status": "met", "evidence": "tests/test_main.py::test_dry_run"},
+    {"id": "M2", "mandatory": true, "status": "met", "evidence": "tests/test_main.py::test_default"},
+    {"id": "O1", "mandatory": false, "status": "met", "evidence": "help output snippet in checks"}
+  ],
+  "artifacts": [
+    {"path": "src/sample_cli/main.py", "sha256": "SYNTHETIC_HASH_MAIN"},
+    {"path": "tests/test_main.py", "sha256": "SYNTHETIC_HASH_TEST"}
+  ],
+  "coordinator_checks": [
+    {"cmd": "python3 -m unittest discover -s tests -t .", "result": "ok", "limits": "offline only"}
+  ],
+  "uncertainties": [],
+  "scope_changes": [],
+  "repair_budget": {"used": 0, "remaining": 1},
+  "requested_astra_response": "aligned | repair_required | blocked"
+}

@@ -1,95 +1,101 @@
-# custom-skills
+# Agent Tools
 
-Public home for custom Hermes Agent skills that are not part of the bundled
-Hermes tree.
+## Small tools for agents with big jobs.
 
-Skills live under `skills/<category>/<skill-name>/` so later additions stay
-grouped (discovery, devops, media, …). Add a category folder when the first
-skill in that class lands. Do not dump new skills at the repo root.
+This repository is a public workshop for practical agent skills: keep machines updated without losing control, find useful skills without catalog bloat, tame an inbox without reckless deletion, coordinate worker fleets, connect Codex to a persistent Hermes Agent, and stop giant files from eating the context window.
 
-## Skills
+Every tool has one job, visible guardrails, and a way to prove it works before you trust it with real work.
 
-| Skill | Category | Purpose |
-|---|---|---|
-| [KSU — Keep Shit Updated](skills/devops/ksu/) | devops | Discover harnesses, packages and skills; choose exact targets per machine; run quiet nightly maintenance with source protections. |
-| [proactive-skill-suggestor](skills/discovery/proactive-skill-suggestor/) | discovery | High-bar Skills Hub scout from recent Hermes work. Suggest-only. Upgrade similar local skills instead of installing duplicates. |
-| [jev-skill-advisor](skills/discovery/jev-skill-advisor/) | discovery | Harness-neutral Jev selection service with CLI/MCP adapters, hash-bound reads, and host-local SQLite evidence. |
-| [gmail-triage](skills/email/gmail-triage/) | email | Portable Gmail triage, sender cleanup, unsubscribe, undo, and mailbox health through Composio-managed authentication. |
-| [hermes-router](skills/harness/hermes-router/) | harness | Persistent remote Hermes sessions in Codex Desktop; requires codex-router and local request/catalog hooks. |
-| [shunt](skills/harness/shunt/) | harness | Gate oversized file reads; OpenRouter `google/gemini-3.8-flash` returns points-only so the main model decides/edits. Shared core + thin harness adapters. |
+## Pick your problem
 
-Related (separate repository — install from there, not mirrored here):
-[herdr-orchestration](https://github.com/btcjon/herdr-orchestration) — portable Herdr coordinator policy (Astra-main / Sol-main / Auto-main).
+### [KSU — Keep Stuff Updated](skills/devops/ksu/)
 
-## Install (Hermes)
+![KSU keeps only your chosen tools updated](skills/devops/ksu/assets/hero.webp)
+
+Discover the harnesses, packages, skills, plugins, and programs on a machine—then quietly maintain **only the targets you approve**.
+
+**Best for:** controlled nightly maintenance without blind upgrades or surprise reboots.
+
+### [Proactive Skill Suggestor](skills/discovery/proactive-skill-suggestor/)
+
+![A scout finds the few useful skills in a galaxy of options](skills/discovery/proactive-skill-suggestor/assets/hero.webp)
+
+Search the Skills Hub from recent work patterns, inspect the real candidates, and recommend the useful few without automatically installing anything.
+
+**Best for:** discovering capability gaps without turning your skill library into a junk drawer.
+
+### [Jev Skill Advisor](skills/discovery/jev-skill-advisor/)
+
+![Jev narrows a huge skill catalog to one verified recommendation](skills/discovery/jev-skill-advisor/assets/hero.webp)
+
+Select the relevant skill from a large canonical catalog without loading the whole warehouse into the main model's context.
+
+**Best for:** harness builders who want bounded, measurable, advisory skill routing.
+
+### [Gmail Triage](skills/email/gmail-triage/)
+
+![A human-controlled system sorts a crowded inbox while protecting important mail](skills/email/gmail-triage/assets/hero.webp)
+
+Review noisy senders, approve exact cleanup actions, unsubscribe safely, verify Gmail filters, and preserve an undoable record.
+
+**Best for:** inbox cleanup where the user—not the automation—holds the final switch.
+
+### [Hermes Router](skills/harness/hermes-router/)
+
+![A secure bridge connects a desktop chat to a persistent remote Hermes Agent](skills/harness/hermes-router/assets/hero.webp)
+
+Use Codex Desktop as the chat surface for an existing remote Hermes Agent while Hermes keeps its own inference, tools, permissions, and persistent sessions.
+
+**Best for:** bringing a remote agent into Codex without putting a second model in the middle.
+
+### [Herdr Orchestration](skills/harness/herdr-orchestration/)
+
+![A coordinator safely directs a fleet of specialized AI workers](skills/harness/herdr-orchestration/assets/hero.webp)
+
+Claim workers safely, route work through explicit coordinator profiles, enforce bounded repairs, and accept results from evidence rather than status labels.
+
+**Best for:** running Herdr worker fleets without collisions, silent model substitutions, or recursive delegation chaos.
+
+### [Shunt](skills/harness/shunt/)
+
+![Shunt turns a mountain of file content into a handful of useful pointers](skills/harness/shunt/assets/hero.webp)
+
+Catch oversized file reads and return compact names, paths, line ranges, and orientation points so the main model can spend context on judgment.
+
+**Best for:** multi-harness teams tired of paying premium-model attention to raw bulk text.
+
+## Install a skill
+
+Clone the repository, then link or copy only the package you want into the skill directory used by your agent:
 
 ```bash
-git clone https://github.com/btcjon/custom-skills.git
-ln -s "$(pwd)/custom-skills/skills/discovery/proactive-skill-suggestor" \
-  ~/.hermes/skills/proactive-skill-suggestor
-# Optional: oversized-read gate CLI + adapters
-ln -sfn "$(pwd)/custom-skills/skills/harness/shunt" ~/.hermes/skills/shunt
+git clone https://github.com/btcjon/agent-tools.git
+ln -s "$(pwd)/agent-tools/skills/<category>/<skill-name>" \
+  ~/.hermes/skills/<skill-name>
 ```
 
-Load with `skill_view(name="proactive-skill-suggestor")` in a new session.
-For shunt: install the CLI from `skills/harness/shunt` (`pip install -e ".[dev]"`), then `shunt doctor` / `shunt install` (see that package README).
+Some packages also need a Python or Node installation step, an external connection, or harness-specific adapter wiring. Open that package's README first; copying a `SKILL.md` does not magically install its runtime.
 
-For Gmail Triage, link or copy `skills/email/gmail-triage` into the skill
-directory used by your agent, then connect Gmail through Composio. The agent needs
-both Agent Skills support and an approved Composio Gmail connection.
+## The rules behind the tools
 
-## Try Gmail Triage without a mailbox
+- **No hidden authority:** discovery, advice, or review is not permission to mutate.
+- **No secret soup:** credentials, transcripts, mailbox data, inventories, and runtime state stay outside this public repository.
+- **No proof theater:** tests, dry runs, live canaries, and UI verification are different evidence.
+- **No duplicate sprawl:** upgrade an existing capability when that is cleaner than adding another near-copy.
 
-New users and their agents: [Start here](skills/email/gmail-triage/references/quickstart.md)
-for installation, connection, preferences, first-batch verification and limits.
+## Add another skill
 
-The whole decision pipeline is offline and standard library only, so it can be
-proven before any account is connected:
+Use one package per directory:
 
-```bash
-cd skills/email/gmail-triage
-python3 scripts/triage_core.py selftest      # synthetic fixtures, no network
-python3 -m unittest discover -s tests -t tests
+```text
+skills/<category>/<skill-name>/
+├── README.md
+├── SKILL.md
+├── scripts/
+├── references/
+└── tests/
 ```
 
-`selftest` walks rank, plan, duplicate-safe filter check, readback verification,
-receipts, resume, and health on the bundled fixtures and reports a pass per step.
-Runtime state lives outside the repository in `--state-dir` (default
-`~/.gmail-triage`, `0700` directory with a `0600` database) and mailbox-derived
-files are covered by `.gitignore`.
+Include only the folders the package needs. Keep receipts, transcripts, credentials, and generated runtime state out of Git.
 
-## Scout once (no cron)
-
-```bash
-python3 skills/discovery/proactive-skill-suggestor/scripts/mine_session_themes.py --hours 72 \
-  > /tmp/mine.json
-python3 skills/discovery/proactive-skill-suggestor/scripts/search_hub.py --mine-json /tmp/mine.json
-# Agent inspects top hits per SKILL.md. Suggest only.
-```
-
-Empty output means silence. Suggestions are a proposal, not a mutation.
-
-## Adding a skill
-
-1. Pick or create `skills/<category>/`.
-2. Put a complete package there: `SKILL.md`, then `scripts/`, `references/`, `tests/` as needed.
-3. Symlink the package directory into `~/.hermes/skills/<skill-name>` (not the whole repo).
-
-Packages may target other Agent Skills-compatible harnesses as well. Their
-external tool connections and permissions remain separate from the skill files.
-
-## Privacy
-
-The miner emits compact work-class JSON (titles, skill names, query seeds).
-Do not commit `receipts/` or raw transcripts. This repo is public.
-
-Gmail Triage keeps mailbox-derived data out of the repository entirely: normalized
-message files, candidate lists, plans, results, and its SQLite audit state live in
-a private state directory, and its receipts store sender addresses, action classes,
-outcome classes, and Gmail filter IDs only — never bodies, subjects, unsubscribe
-URLs, tokens, or credentials. The only committed message data is the synthetic
-`fixtures/` set used by `selftest`.
-
-## KSU: nightly maintenance
-
-Point your agent at [KSU](skills/devops/ksu/SKILL.md) and ask it to enroll your machines. Review its local checkbox inventory and save selections first. The default schedule is 03:00 local time, app/service restarts allowed, full reboots deferred, and quiet local health reports. [Setup, coverage, and limitations](skills/devops/ksu/references/setup.md).
+MIT licensed unless a package states otherwise.

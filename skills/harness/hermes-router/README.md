@@ -1,60 +1,66 @@
-# Hermes router
+# Hermes Router
 
-Use Codex Desktop as a chat surface for your existing remote Hermes Agent. Select **Hermes (VPS)** in the model picker: messages reach a persistent Hermes session and its replies return directly, without a second model rewriting them.
+![A secure bridge connects a desktop chat to a persistent remote Hermes Agent](assets/hero.webp)
 
-## Required dependency: codex-router
+## Put your remote Hermes Agent inside Codex Desktop—without replacing its brain.
 
-This package **depends on [codex-router](https://github.com/duolahypercho/codex-router)**. It is an adapter and local integration patch, not a standalone model provider or an upstream-supported codex-router extension API. Both the request handler and model-catalog hooks are required. Router updates may require reapplying/reviewing those hooks.
+Hermes Router turns Codex Desktop into a clean chat surface for an existing remote Hermes Agent. Pick **Hermes (VPS)**, send a message, and the adapter routes it into a persistent Hermes session. The reply comes straight back—no second model rewriting it.
 
-Integration was exercised against router revision `5e1b49e6` with the local hooks described below, Hermes API version `0.21.3`, and Codex on macOS. Other revisions and platforms need their own checks.
+Your Hermes host keeps inference, tools, permissions, credentials, and session history. Codex gets the conversation surface.
+
+## What you get
+
+- **Persistent conversations:** each Codex task stays bound to the same Hermes session.
+- **Existing-session attachment:** continue a conversation already living in Hermes.
+- **Direct replies:** Hermes output returns through the Responses protocol without a model in the middle.
+- **Safe file return:** approved generated files can be copied back through strict path, type, count, and size boundaries.
+- **Failure awareness:** uncertain or interrupted turns remain pending instead of being blindly sent twice.
+
+## How it works
+
+1. **Select:** choose the private Hermes entry in the Codex model picker.
+2. **Route:** codex-router forwards only the newest user text over your explicit SSH host.
+3. **Continue:** the local task-to-session binding preserves continuity and returns the response or approved files.
+
+It is a secure bridge between two workspaces—not a transcript blender.
+
+## Required dependency
+
+This package depends on [codex-router](https://github.com/duolahypercho/codex-router). It is an adapter and local integration patch, not a standalone model provider or an upstream extension API.
+
+The integration was exercised against codex-router revision `5e1b49e6`, Hermes API `0.21.3`, and Codex on macOS. Other revisions and platforms require their own checks.
 
 ## Prerequisites
 
-- Working Codex Desktop/CLI and codex-router installation.
-- Node.js 22+ locally, OpenSSH client, and Python 3.9+ on the remote host (Python 3.9+ locally for tests).
-- An existing Hermes API with session create/read/chat endpoints, bound to remote loopback. The remote `API_SERVER_KEY` remains in the remote environment or Hermes `.env` file.
-- An authenticated SSH alias available to the router service, with a verified host key. The portable default alias is `hermes-host`; configure your own explicitly.
+- Working Codex Desktop or CLI plus a codex-router installation.
+- Node.js 22+ and an OpenSSH client on the local machine.
+- Python 3.9+ on the remote Hermes host, plus Python 3.9+ locally for tests.
+- An existing Hermes API with session create, read, and chat endpoints bound to remote loopback.
+- An authenticated SSH alias available to the router service with a verified host key.
 
-No npm runtime dependencies. The repository MIT license applies.
+The remote `API_SERVER_KEY` stays in the remote environment or Hermes `.env` file; it is never copied into this repository.
 
 ## Install
 
-1. Clone this repository and run `npm test` in `skills/harness/hermes-router`.
-2. Follow [codex-router integration](references/codex-router-integration.md) to add the two hooks, configure the service environment, and publish the picker entry. This is manual source integration, not an automatic installer.
-3. Restart the router and reopen Codex if its model picker is cached.
-4. Select **Hermes (VPS)** on a task. The first message creates a Hermes session; later messages reuse it.
+```bash
+cd skills/harness/hermes-router
+npm test
+```
 
-Agent skill discovery is optional: link this directory into your harness's skill directory. That link alone does not install the router hooks. Keep the package at a stable path once the router references it.
+Then follow [codex-router integration](references/codex-router-integration.md) to install the request handler and model-catalog hooks, configure the router service environment, restart the router, and refresh Codex Desktop.
 
-## Continue an existing conversation
+To continue an existing Hermes conversation, send:
 
-Send `/hermes attach <session-id>` before your next message, or use the loopback chooser. Attaching validates the session and saves the task binding without sending a chat message. The same session can then be continued from Hermes Desktop.
+```text
+/hermes attach <session-id>
+```
 
-The chooser starts on `127.0.0.1:8879` with the first adapter request. Its private capability URL is saved to `~/.codex/hermes-picker/ui.json` (or under `CODEX_HOME`). Open the complete URL locally; do not publish it. A router restart changes the capability. The chooser lists recent Codex tasks and up to 50 Hermes sessions.
+## Important boundaries
 
-Mappings live in `~/.codex/hermes-picker/task-sessions.json`; returned files live beside them under `artifacts/`. Keep those files private and outside Git.
+- Text input only; Codex history, system instructions, and tools are not forwarded.
+- Credentials remain on the Hermes host. Local mappings and returned artifacts remain outside Git.
+- Tool-call display, live progress, token usage, and full lifecycle mirroring are not implemented.
+- Cancellation does not prove the remote task stopped. Inspect uncertain remote state before retrying.
+- A host-specific live canary is required after installation; passing package tests alone does not prove Desktop integration.
 
-## Configuration
-
-See [examples/config.env.example](examples/config.env.example). Set variables in the actual router service environment; exporting them in an unrelated shell does not affect an already-running service. The remote credential path expands `~` on the remote host.
-
-`HERMES_PICKER_ALLOWED_SESSION_IDS` optionally restricts session access (comma-separated). `HERMES_PICKER_ALLOW_CREATE=false` disables new sessions. `HERMES_PICKER_MAP_PATH` and `HERMES_PICKER_ARTIFACTS_ROOT` override local storage. The default artifact allowlist is `/tmp/codex-hermes-artifacts`; configure any additional dedicated absolute output directories explicitly. Files outside these roots are not copied.
-
-## Behavior and limits
-
-- Text input only. Only the newest user text is forwarded; existing Codex history, system instructions and tools are not imported into Hermes.
-- Hermes owns model selection, tools and permissions. This package does not change either harness's permission settings.
-- Replies use assistant text through the Responses protocol. Tool-call display and live progress are not implemented.
-- Old Hermes transcripts and rename/archive/fork actions do not mirror into Codex automatically. Task bindings provide session continuity, not full lifecycle synchronization.
-- Generated Markdown file links inside allowed directories are copied locally (up to 8 files, 2 MB each). Hidden files, symlink escapes and nonregular files are rejected. `/hermes files <paths>` requests explicit allowed files.
-- Concurrent turns are blocked. The last completed request identity can be replayed without re-running Hermes. Without a stable turn identity, identical complete payloads cannot be distinguished reliably; this is not a general exactly-once ledger.
-- Cancellation or a transport failure may leave Hermes running. Pending state blocks further turns until the outcome is inspected and resolved; there is no pending-resolution UI.
-- Token usage is unavailable; clients may render it as zero. The catalog context size is a frontend setting, not a promise about the Hermes model.
-
-## Verification
-
-`npm test` runs synthetic adapter, real HTTP/SSE, retry, cancellation, locking, chooser-authentication and file-boundary checks without contacting a real account. The original deployment additionally verified native Codex execution/resume, Hermes Desktop continuity and exact generated-file contents. The packaged portable defaults still require a host-specific live canary after installation. Desktop picker/chooser rendering was not part of that original visual acceptance.
-
-## Rollback
-
-Remove the private catalog entry and republish the router catalog to hide the picker option. Reverse only the two integration hooks and restart the router to remove execution support. Preserve other router edits and private task mappings; do not overwrite whole files from stale backups. Remote Hermes sessions and services are not removed.
+See [`SKILL.md`](SKILL.md) for the operating contract and the integration guide for configuration, verification, and rollback.

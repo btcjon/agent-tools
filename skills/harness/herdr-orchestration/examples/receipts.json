@@ -1,0 +1,16 @@
+{
+  "done_example": {
+    "job_id": "demo-exec-0001",
+    "status": "done",
+    "artifacts": ["src/sample_cli/main.py", "tests/test_main.py"],
+    "checks": ["unittest → ok"],
+    "blocker": null
+  },
+  "blocked_example": {
+    "job_id": "demo-exec-0002",
+    "status": "blocked",
+    "artifacts": [],
+    "checks": ["unittest → not run"],
+    "blocker": "Missing writable path authorization for src/sample_cli/"
+  }
+}

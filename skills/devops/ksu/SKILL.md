@@ -1,9 +1,9 @@
 ---
 name: ksu
-description: "Keep Shit Updated (KSU): discover AI harnesses, packages, skills/plugins and programs; let users select exact update targets per machine; run quiet nightly maintenance with protected sources and bounded recovery."
+description: "Keep Stuff Updated (KSU): discover AI harnesses, packages, skills/plugins and programs; let users select exact update targets per machine; run quiet nightly maintenance with protected sources and bounded recovery."
 ---
 
-# KSU — Keep Shit Updated
+# KSU — Keep Stuff Updated
 
 Prioritize **AI harnesses → packages/tools → skills/plugins → other programs**. Use the bundled Python discovery and selection workflow before scheduling updates. Each host has its own inventory and saved selections; discovering software is not permission to update it.
 

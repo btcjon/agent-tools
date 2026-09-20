@@ -19,7 +19,7 @@ After `shunt install` (or adapter `install.sh`), **already-open agent sessions d
 
 ```bash
 # 1) Install / refresh adapters (host)
-cd /Users/jonbennett/Library/CloudStorage/Dropbox/Projects/custom-skills/skills/harness/shunt
+cd /Users/jonbennett/Library/CloudStorage/Dropbox/Projects/agent-tools/skills/harness/shunt
 shunt install                 # cursor/codex/claude merge
 bash adapters/pi/install.sh
 bash adapters/grok/install.sh

@@ -1,0 +1,23 @@
+{
+  "session": "example-session",
+  "claims_state_dir": "~/.local/state/herdr-mode",
+  "reference_bindings": {
+    "sol_main": "Codex Sol 5.6",
+    "auto_main": "Cursor Auto",
+    "judgment_model": {
+      "product": "codex",
+      "model_id": "gpt-6-astra",
+      "reasoning_effort": "xhigh"
+    },
+    "judgment_slots": ["astra-1", "astra-2", "astra-3", "astra-4", "astra-5"],
+    "ordinary_pool_constraint_astra_main": "non-OpenAI only"
+  },
+  "local_overrides": {
+    "session": "YOUR_SESSION",
+    "claims_state_dir": "~/.local/state/herdr-mode",
+    "pane_ids": {
+      "note": "Discover live pane ids each job; do not hardcode foreign fleets"
+    }
+  },
+  "notes": "reference_bindings are exact for this package. Changing models is an explicit adaptation, not equivalent intelligence. Do not copy another operator's permission bypass flags."
+}

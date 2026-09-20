@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "snapshot_id": "002f229bf4139f08a4122a694f31b3c3df68255eaa3d07395e23f6bb1916afd8",
+  "provider_attempt_cap": 8,
+  "cases": [
+    {
+      "id": "session-decisions-positive",
+      "task": "Find my conversations about vendor pricing and summarize the decisions we reached.",
+      "context": "The user wants topic-based session discovery and decision recall.",
+      "harness": "hermes",
+      "acceptable_ids": ["warehouse:session-librarian"],
+      "expect": "selection"
+    },
+    {
+      "id": "session-cleanup-positive",
+      "task": "Rename the useful project sessions clearly and propose stale duplicates to archive.",
+      "context": "The request is scoped to organizing the user's session library.",
+      "harness": "codex",
+      "acceptable_ids": ["warehouse:session-librarian"],
+      "expect": "selection"
+    },
+    {
+      "id": "router-logs-negative",
+      "task": "Inspect the Hermes model-router logs for the cause of recent HTTP 429 responses.",
+      "context": "This is runtime troubleshooting, not session-library management.",
+      "harness": "hermes",
+      "acceptable_ids": [],
+      "forbidden_ids": ["warehouse:session-librarian"],
+      "expect": "abstain"
+    },
+    {
+      "id": "duplicate-files-negative",
+      "task": "Find duplicate PDF files in this Dropbox project and prepare a safe cleanup list.",
+      "context": "This concerns filesystem documents, not agent sessions.",
+      "harness": "codex",
+      "acceptable_ids": [],
+      "forbidden_ids": ["warehouse:session-librarian"],
+      "expect": "abstain"
+    }
+  ]
+}

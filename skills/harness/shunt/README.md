@@ -1,62 +1,65 @@
-# shunt
+# Shunt
 
-Cheap bulk-file reader that returns **points only** (bullets, names, paths, line ranges, coverage) so the main model decides and edits.
+![Shunt turns a mountain of file content into a handful of useful pointers](assets/hero.webp)
 
-Canonical package: [`btcjon/custom-skills`](https://github.com/btcjon/custom-skills) → `skills/harness/shunt/`.
+## Stop feeding whole files to your most expensive brain.
 
-## Purpose
+Shunt catches oversized file reads and routes the bulk through a cheaper reader that returns **points only**: names, paths, line ranges, coverage bullets, and useful orientation.
 
-Large files waste main-model context when agents read them whole. `shunt` gates oversized native reads (hooks/extensions) and sends allowed bulk jobs through a locked cheap OpenRouter model that returns structured pointers—not rewrites.
+The main model still decides. The main model still edits. It simply gets a map instead of swallowing the mountain.
+
+## What you get
+
+- **Less context waste:** large reads become compact pointers instead of giant prompt payloads.
+- **One shared policy:** a common core with thin adapters for Codex, Cursor, Claude, Pi, Grok, Agy, and Hermes.
+- **Hard safety boundaries:** secret paths are blocked and Shunt cannot act as a coding agent or editor.
+- **Predictable routing:** one locked primary provider and one explicit fallback—never a mystery third model.
+- **Privacy-safe telemetry:** operational outcomes are recorded without file contents or clear file paths.
+
+## How it works
+
+1. **Gate:** a harness hook checks whether a native file read is oversized.
+2. **Shunt:** blocked bulk content goes through the installed reader.
+3. **Return:** the main model receives concise orientation, then performs any targeted reads and edits itself.
+
+Shunt is the side channel that keeps a dump truck of text from parking in your context window.
 
 ## Install
 
 ```bash
-cd skills/harness/shunt   # this package
-python3 -m venv .venv && source .venv/bin/activate
+cd skills/harness/shunt
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
-# OPENROUTER_API_KEY from secrets / .env (never commit)
 shunt doctor
-shunt install             # merge Cursor/Codex/Claude (+ sidecar targets)
-bash adapters/pi/install.sh
-bash adapters/grok/install.sh
-bash adapters/agy/install.sh
-# Hermes: merge adapters/hermes/hooks.snippet.yaml into ~/.hermes/config.yaml
-# Then reload sessions — see docs/RELOAD-POLICY.md
+shunt install
 ```
 
-Hermes skill link (optional):
+Additional harness adapters and reload requirements are documented in [`references/install.md`](references/install.md), [`adapters/README.md`](adapters/README.md), and [`docs/RELOAD-POLICY.md`](docs/RELOAD-POLICY.md).
+
+## Core commands
+
+| Command | What it does |
+| --- | --- |
+| `shunt bulk-read PATH` | Returns points-only orientation for an allowed large file |
+| `shunt check-read PATH` | Allows or blocks a native full-file read |
+| `shunt doctor` | Reports configuration, credentials, and registrations |
+| `shunt install --dry-run` | Previews adapter hook changes before installation |
+
+## Locked provider route
+
+- Primary: direct Z.ai Coding Plan `glm-5.3` using `ZAI_API`.
+- Fallback: Cerebras `gpt-oss-120b` using `CEREBRAS_API_KEY`.
+- A third provider or model is not allowed.
+
+## Not a second decision-maker
+
+Shunt does not rewrite files, make product decisions, or replace targeted reading. It handles oversized orientation work so the lead model can spend its attention where judgment matters.
+
+Run the package tests before changing the shared core or adapters:
 
 ```bash
-ln -sfn "$(pwd)" ~/.hermes/skills/shunt
+pytest -q
 ```
 
-## OpenRouter lock (mandatory)
-
-- Bulk-reader: **`google/gemini-3.8-flash`** via OpenRouter only (pay-per-token).
-- **NEVER** fall back to CAPI Gemini OAuth, `gflash*`, or a rate-limited Google account Flash path.
-
-## Commands
-
-| Command | Behavior |
-| --- | --- |
-| `shunt bulk-read PATH` | Gate + live OpenRouter points (needs `OPENROUTER_API_KEY`) |
-| `shunt check-read PATH` | Allow/deny agent full-read (hooks use this) |
-| `shunt doctor` | Config, key presence, registration report |
-| `shunt install [--dry-run]` | Backup + merge adapter hooks into harness configs |
-
-## Docs
-
-- `docs/ACCEPTANCE.md` / `docs/ACCEPTANCE-LIVE.md` — proof matrices  
-- `docs/LIVE-*.md` — per-harness live evidence  
-- `docs/HERDR.md`, `docs/RELOAD-POLICY.md` — worker inheritance / reload  
-- `docs/PHASE-0-APPLIED.md` — OAuth Flash kill  
-
-## Non-goals
-
-- Not a general coding agent or second decision-maker.
-- Does not install the Spotify Portal Claude Code plugin.
-- Adapters are thin registrations over shared core—not N hand-forked policies.
-
-## License
-
-MIT
+MIT licensed.

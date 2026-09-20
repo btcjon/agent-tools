@@ -188,6 +188,28 @@ def fits(payload):
     return len(json.dumps(wire["state"]).encode()) <= 8000 and len(json.dumps(wire).encode()) <= 16000
 
 
+def detail_selection_audit(confidence, fit, *, confidence_floor=0.65, fit_floor=0.8, cache_hit=False, decision="selection"):
+    values = (confidence, fit, confidence_floor, fit_floor)
+    if any(not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or not 0 <= value <= 1 for value in values):
+        raise ValueError("invalid_detail_decision_input")
+    if decision not in {"selection", "none"}:
+        raise ValueError("invalid_detail_decision_input")
+    confidence_pass = confidence >= confidence_floor
+    fit_pass = fit >= fit_floor if decision == "selection" else fit < fit_floor
+    failed = []
+    if not confidence_pass:
+        failed.append(f"winner_confidence:{confidence}<{confidence_floor}")
+    if not fit_pass:
+        operator = "<" if decision == "selection" else ">="
+        failed.append(f"finalist_fit:{fit}{operator}{fit_floor}")
+    return {"winner_confidence": confidence, "finalist_fit": fit,
+            "confidence_floor": confidence_floor, "fit_floor": fit_floor,
+            "confidence_pass": confidence_pass, "fit_pass": fit_pass,
+            "passed": confidence_pass and fit_pass, "failed_predicates": failed,
+            "decision": decision, "fit_operator": ">=" if decision == "selection" else "<",
+            "provider_evidence": "cache_replay" if cache_hit else "original_response"}
+
+
 def scan(registry, request, context, evaluator, *, floor=0.7, max_optional=5,
          deadline_s=5.0, max_calls=32, max_tokens=200000, detail_review=False,
          detail_fit_floor=0.8, detail_confidence_floor=0.65):
@@ -295,14 +317,20 @@ def scan(registry, request, context, evaluator, *, floor=0.7, max_optional=5,
             receipt["detail_confidence"] = winner["confidence"]
             if winner["choice"] == "none":
                 max_fit = max(response["answers"][f"fit_{chr(ord('A') + i)}"]["noul"] for i in range(len(finalists)))
-                confident_none = winner["confidence"] >= detail_confidence_floor and max_fit < detail_fit_floor
-                return finish("detail_none" if confident_none else "detail_uncertain", "complete" if confident_none else "uncertain")
+                receipt["decision_audit"] = detail_selection_audit(
+                    winner["confidence"], max_fit, confidence_floor=detail_confidence_floor,
+                    fit_floor=detail_fit_floor, cache_hit=cache_hit, decision="none")
+                return finish("detail_none" if receipt["decision_audit"]["passed"] else "detail_uncertain",
+                              "complete" if receipt["decision_audit"]["passed"] else "uncertain")
             chosen_index = ord(winner["choice"]) - ord("A")
             if chosen_index < 0 or chosen_index >= len(finalists):
                 return finish("detail_invalid_choice")
             fit = response["answers"][f"fit_{winner['choice']}"]["noul"]
             receipt["detail_fit"] = fit
-            if winner["confidence"] < detail_confidence_floor or fit < detail_fit_floor:
+            receipt["decision_audit"] = detail_selection_audit(
+                winner["confidence"], fit, confidence_floor=detail_confidence_floor,
+                fit_floor=detail_fit_floor, cache_hit=cache_hit)
+            if not receipt["decision_audit"]["passed"]:
                 return finish("detail_uncertain", "uncertain")
             matching = [finalists[chosen_index].id]
     receipt["selected"] = matching

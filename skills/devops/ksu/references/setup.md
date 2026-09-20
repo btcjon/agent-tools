@@ -1,6 +1,6 @@
 # KSU v0.2: discovery and selection
 
-Point an Agent Skills-compatible agent at [KSU](https://github.com/btcjon/custom-skills/tree/main/skills/devops/ksu) and ask it to discover your machines' AI harnesses, packages and skills before enabling maintenance. Clone the public repository and load `SKILL.md`. No private infrastructure, paid agent session, or Topgrade installation is required for the selection runner.
+Point an Agent Skills-compatible agent at [KSU](https://github.com/btcjon/agent-tools/tree/main/skills/devops/ksu) and ask it to discover your machines' AI harnesses, packages and skills before enabling maintenance. Clone the public repository and load `SKILL.md`. No private infrastructure, paid agent session, or Topgrade installation is required for the selection runner.
 
 ## Review without updating anything
 

@@ -42,3 +42,28 @@ After creation, run `verify --cache-root /absolute/notion-library`. Verification
 Notion may serialize equivalent Markdown differently. Verification uses a versioned structural comparator rather than weakening the approved source: it recognizes only documented Notion normalizations for blank lines, a title-matching leading H1, list indentation and continuation wrappers, GFM/Notion tables, formatting wrappers, and `text`/`plain text`/`txt` fence labels. Instruction text, headings, list nesting, table cells, links, code, and duplicate-key-rejected preserved YAML metadata must remain equivalent. The audit receipt records both raw hashes and every normalization rule used for each page and exported skill.
 
 This pilot does not change the canonical warehouse, install imported skills into a harness, execute exported MCP configuration, retire symlinks, or grant broader Notion access.
+
+## Jev shadow evaluation
+
+After a snapshot passes publication verification, prepare a host-local shadow profile bound only to that snapshot and run the frozen synthetic cases:
+
+```bash
+skill-advisor-shadow prepare \
+  --cache-root /absolute/notion-library \
+  --state-dir /absolute/notion-shadow \
+  --profile /absolute/notion-shadow/profile.json \
+  --harness pilot \
+  --credential-file /absolute/selected.env
+
+skill-advisor-admin \
+  --config /absolute/notion-shadow/profile.json \
+  init-db
+
+skill-advisor-shadow run \
+  --cache-root /absolute/notion-library \
+  --profile /absolute/notion-shadow/profile.json \
+  --cases examples/notion-shadow-cases.json \
+  --report /absolute/notion-shadow/report.json
+```
+
+The runner refuses non-shadow profiles, reads, nonempty read allowlists, stale snapshot/catalog provenance, and budgets above 20 provider attempts. It never calls the body-read path or injects a skill. The concise report contains selections, disagreements and aggregate provider/cache telemetry; detailed service responses stay host-local. This measures selection behavior only. It does not prove main-model token savings, production harness behavior, or readiness to remove symlinks.

@@ -14,8 +14,10 @@ skills/
 
 Current categories:
 
+- `devops/` — controlled discovery, updates, and host maintenance
 - `discovery/` — finding, ranking, and suggesting skills
 - `email/` — email triage, review, and mailbox hygiene
+- `harness/` — agent routing, orchestration, and context controls
 
 Rules:
 

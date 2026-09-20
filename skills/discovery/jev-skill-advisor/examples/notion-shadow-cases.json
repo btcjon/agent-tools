@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "snapshot_id": "002f229bf4139f08a4122a694f31b3c3df68255eaa3d07395e23f6bb1916afd8",
+  "cases": [
+    {
+      "id": "plan-positive",
+      "task": "Write a concrete implementation plan for adding rate limiting to this service. Do not implement it yet.",
+      "context": "The user explicitly requested planning only.",
+      "harness": "codex",
+      "acceptable_ids": ["warehouse:plan"],
+      "expect": "selection"
+    },
+    {
+      "id": "session-librarian-positive",
+      "task": "Find my Hermes sessions about pricing, summarize the decisions, and propose stale duplicates to archive.",
+      "context": "This is a Hermes session-library management request.",
+      "harness": "hermes",
+      "acceptable_ids": ["warehouse:session-librarian"],
+      "expect": "selection"
+    },
+    {
+      "id": "workspace-product-positive",
+      "task": "Design a Workspace feature that promotes a chat into a persistent task with a verification gate.",
+      "context": "The product being improved is Hermes Workspace itself.",
+      "harness": "hermes",
+      "acceptable_ids": ["warehouse:workspace-product-improvement"],
+      "expect": "selection"
+    },
+    {
+      "id": "irrelevant-abstain",
+      "task": "Translate hello into Spanish.",
+      "context": "No planning artifact, session management, or Workspace product work is requested.",
+      "harness": "codex",
+      "acceptable_ids": [],
+      "expect": "abstain"
+    },
+    {
+      "id": "explicit-plan-zero-call",
+      "task": "Use the plan skill for this request.",
+      "context": "The user explicitly selected the skill.",
+      "harness": "codex",
+      "explicit_skills": ["plan"],
+      "acceptable_ids": ["warehouse:plan"],
+      "expect": "selection"
+    },
+    {
+      "id": "hermes-router-config-abstain",
+      "task": "Change the request timeout in this Hermes model-router configuration from 30 to 60 seconds.",
+      "context": "This is a direct configuration edit, not session-library management or Workspace product design.",
+      "harness": "hermes",
+      "acceptable_ids": [],
+      "forbidden_ids": ["warehouse:session-librarian", "warehouse:workspace-product-improvement"],
+      "expect": "abstain"
+    },
+    {
+      "id": "ordinary-code-abstain",
+      "task": "Fix the null-pointer bug in this standalone Python parser and run its tests.",
+      "context": "This is ordinary application code, not Hermes Workspace product design.",
+      "harness": "codex",
+      "acceptable_ids": [],
+      "forbidden_ids": ["warehouse:workspace-product-improvement"],
+      "expect": "abstain"
+    },
+    {
+      "id": "plan-positive-replay",
+      "task": "Write a concrete implementation plan for adding rate limiting to this service. Do not implement it yet.",
+      "context": "The user explicitly requested planning only.",
+      "harness": "codex",
+      "acceptable_ids": ["warehouse:plan"],
+      "expect": "selection",
+      "replay_of": "plan-positive"
+    }
+  ]
+}
