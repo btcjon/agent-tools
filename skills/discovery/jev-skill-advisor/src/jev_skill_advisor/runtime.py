@@ -2,7 +2,7 @@
 from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timezone
-import hashlib, json, os, shutil, sqlite3, time, uuid
+import hashlib, json, math, os, shutil, sqlite3, time, uuid
 from .client import AdvisorError, evaluate
 
 CACHE_VERSION = "service-v1"
@@ -97,6 +97,29 @@ class ServiceRuntime:
             if operation_id:
                 row=db.execute("SELECT provider_attempts FROM operations WHERE id=?",(operation_id,)).fetchone(); result["operation_attempts"]=row[0] if row else 0
         return result
+
+    def stats(self):
+        """Return bounded operational telemetry without prompts, bodies, or credentials."""
+        with self._connect() as db:
+            tables={name:db.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0] for name in ("operations","receipts","receipt_reads","outcomes","response_cache")}
+            outcomes={}; evidence={}
+            for row in db.execute("SELECT payload FROM outcomes"):
+                value=json.loads(row[0]); label=value.get("outcome","unknown"); outcomes[label]=outcomes.get(label,0)+1; source=value.get("evidence","unknown"); evidence[source]=evidence.get(source,0)+1
+            statuses={}; reasons={}; selected={}; provider_attempts=cache_hits=input_tokens=unknown_usage=0; latencies=[]
+            for row in db.execute("SELECT payload FROM receipts"):
+                value=json.loads(row[0]); status=value.get("status","unknown"); reason=value.get("reason","unknown"); statuses[status]=statuses.get(status,0)+1; reasons[reason]=reasons.get(reason,0)+1
+                for sid in value.get("selected_ids",[]): selected[sid]=selected.get(sid,0)+1
+                telemetry=value.get("telemetry",{}); provider_attempts+=int(telemetry.get("provider_attempts",0)); cache_hits+=int(telemetry.get("cache_hits",0)); input_tokens+=int(telemetry.get("input_tokens",0)); unknown_usage+=int(telemetry.get("unknown_usage",0)); latency=telemetry.get("elapsed_ms")
+                if isinstance(latency,(int,float)) and not isinstance(latency,bool): latencies.append(float(latency))
+            last=db.execute("SELECT MAX(created_at) FROM operations").fetchone()[0]
+        latencies.sort()
+        percentile=lambda p: latencies[max(0,math.ceil(p*len(latencies))-1)] if latencies else None
+        budgets=self.counts()
+        return {"profile":{"profile_id":self.profile.profile_id,"catalog_hash":self.profile.catalog_hash,"eligible_skills":len(self.profile.eligible_ids)},
+            "budgets":{**budgets,"prompts_remaining":max(0,self.profile.prompt_limit-budgets.get("prompts",0)),"provider_attempts_remaining":max(0,self.profile.provider_attempt_limit-budgets.get("provider_attempts",0))},
+            "records":tables,"statuses":statuses,"reasons":reasons,"selection_counts":selected,
+            "provider":{"scope":"currently_retained_receipts","samples":len(latencies),"attempts":provider_attempts,"cache_hits":cache_hits,"input_tokens":input_tokens,"unknown_usage":unknown_usage,"latency_ms_p50_nearest_rank":percentile(.5),"latency_ms_p95_nearest_rank":percentile(.95)},
+            "outcomes":outcomes,"outcome_evidence":evidence,"last_operation_at":last,"privacy":"counts_ids_labels_and_aggregates_only"}
 
     def save_receipt(self,receipt):
         payload=json.dumps(receipt,sort_keys=True,separators=(",",":"))

@@ -11,4 +11,4 @@ uv run --with 'mcp>=2,<3' --with-editable . skill-advisor-mcp --config /path/to/
 uv run --with 'mcp>=2,<3' --with-editable . python -m unittest discover -s tests
 ```
 
-See `SKILL.md`, `examples/service-host.example.json`, and `schemas/service-v1.json`.
+Agents and operators should begin with [`TRY_IT.md`](TRY_IT.md) and [`HARNESS_INTEGRATION.md`](HARNESS_INTEGRATION.md), then consult `SKILL.md`, `examples/service-host.example.json`, and `schemas/service-v1.json`.

@@ -48,9 +48,13 @@ class SkillAdvisorService:
         receipt_id = self.runtime.new_receipt_id()
         allowed = list(dict.fromkeys([*selected, *candidates]))
         now = time.time()
+        telemetry = telemetry or {"evaluations": 0, "provider_attempts": 0, "cache_hits": 0,
+                                  "input_tokens": 0, "unknown_usage": 0, "elapsed_ms": 0.0}
         receipt = {"receipt_id": receipt_id, "profile_id": self.profile.profile_id,
                    "session_id": data["session_id"], "request_id": data["request_id"],
                    "status": status, "reason": reason, "allowed_ids": allowed,
+                   "selected_ids": list(selected), "candidate_ids": [sid for sid in candidates if sid not in selected][:3],
+                   "telemetry": telemetry,
                    "implicit": status != "explicit_selection", "created_at": iso(now),
                    "expires_at": iso(now + self.profile.receipt_ttl_s), "reads": {}}
         receipt["bindings"] = {sid: {"content_hash": self.profile.entries[sid].source_hash,
@@ -63,8 +67,7 @@ class SkillAdvisorService:
                 "candidates": [self._card(sid) for sid in candidates if sid not in selected][:3],
                 "availability_evidence": evidence, "catalog_hash": self.profile.catalog_hash,
                 "policy_hash": self.profile.policy_hash,
-                "telemetry": telemetry or {"evaluations": 0, "provider_attempts": 0, "cache_hits": 0,
-                                            "input_tokens": 0, "unknown_usage": 0, "elapsed_ms": 0.0},
+                "telemetry": telemetry,
                 "advisory_only": True}
 
     def suggest(self, value):

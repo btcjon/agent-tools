@@ -61,6 +61,11 @@ class ServiceTests(unittest.TestCase):
                  "skill_id": "warehouse:alpha", "outcome": "applied", "evidence": "self_reported"}
         self.assertEqual(self.service.report_outcome(event)["status"], "recorded")
         self.assertEqual(self.service.report_outcome(event)["status"], "duplicate")
+        stats = self.runtime.stats()
+        self.assertEqual(stats["statuses"]["suggested"], 1)
+        self.assertEqual(stats["outcomes"]["applied"], 1)
+        self.assertEqual(stats["records"]["receipt_reads"], 1)
+        self.assertNotIn("use alpha procedure", json.dumps(stats))
 
     def test_explicit_is_zero_call_and_availability_only_narrows(self):
         result = self.suggest(explicit_skills=["alpha"], available_ids=["warehouse:alpha"])

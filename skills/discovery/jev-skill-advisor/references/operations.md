@@ -13,4 +13,10 @@ Put the profile under host configuration and use a state directory such as `~/.l
 5. Use `migrate-legacy` once when upgrading from JSON/JSONL storage. It creates a timestamped backup and records source hashes so reruns are idempotent; changed previously imported files fail closed.
 6. Run `prune` for expired receipts and cache rows. Pruning never restores consumed budgets.
 
+## Observability
+
+`skill-advisor-admin --config PROFILE status` reports consumed budgets, operation/receipt/read/outcome/cache counts, outcome labels, and the last operation timestamp. Provider totals and nearest-rank latency percentiles cover currently retained receipts and include their sample count; pruning changes that reporting window but never restores lifetime budgets. `doctor` adds current profile mode, harness, catalog hash, eligible/readable counts, and credential availability. Neither command emits prompts, skill bodies, credentials, or provider payloads.
+
+Use receipt IDs and request/session IDs to correlate the harness's own event log. Keep quality judgments outside the advisor database unless they use the bounded outcome labels. Compare shadow suggestions with the skill actually chosen by the harness and independently judged task quality.
+
 Rollback by stopping the service, preserving the SQLite database and legacy backup, and restoring the prior package revision/profile. Do not delete runtime evidence during rollback.
