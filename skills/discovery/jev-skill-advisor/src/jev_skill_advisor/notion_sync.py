@@ -180,18 +180,20 @@ class NtnSyncTransport:
     def update_properties(self,page_id,properties): return self.request(f"v1/pages/{page_id}",method="PATCH",body={"properties":properties},mutation=True)
     def update_markdown(self,page_id,markdown): return self.request(f"v1/pages/{page_id}/markdown",method="PATCH",body={"type":"replace_content","replace_content":{"new_str":markdown}},mutation=True)
     def verify_skill(self,row,page_id,expected_markdown,expected_bundle=None,expected_manifest=None):
-        archive_limit=max(25_000_000,len(expected_bundle or b"")+10_000_000)
+        if expected_bundle is None: expected_bundle=_bundle_bytes(row,_pin_frozen_row(row))
+        if expected_manifest is None: expected_manifest=_generated_manifest(row,expected_bundle)
+        archive_limit=min(600_000_000,max(25_000_000,len(expected_bundle)+len(expected_manifest)+10_000_000))
         client=NotionExportClient(runner=lambda path:self.request(path),max_archive_bytes=archive_limit)
         for attempt in range(3):
             try: export=client.fetch("skill",page_id); break
             except NotionImportError as exc:
-                if str(exc)!="archive_download_failure" or attempt==2: raise SyncError("export_download_failed") from exc
+                code=str(exc)
+                if code=="archive_too_large": raise SyncError("export_archive_too_large") from exc
+                if code!="archive_download_failure" or attempt==2: raise SyncError(code if code!="archive_download_failure" else "export_download_failed") from exc
                 self.sleeper(2**attempt)
         files=_archive_entries(export); roots=_package_roots(files)
         if len(roots)!=1: raise SyncError("export_membership_mismatch")
         root=roots[0]; relative={PurePosixPath(name).relative_to(root).as_posix():entry for name,entry in files.items() if root in PurePosixPath(name).parents}
-        if expected_bundle is None: expected_bundle=_bundle_bytes(row,_pin_frozen_row(row))
-        if expected_manifest is None: expected_manifest=_generated_manifest(row,expected_bundle)
         expected={"package-bundle.txt":hashlib.sha256(expected_bundle).hexdigest(),
                   "skill-package.json":hashlib.sha256(expected_manifest).hexdigest()}
         if set(relative)!={"SKILL.md",*expected}: raise SyncError("export_membership_mismatch")
