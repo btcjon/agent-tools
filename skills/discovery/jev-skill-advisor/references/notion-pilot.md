@@ -39,4 +39,6 @@ The authorization record documents consent; the CLI never creates it. On an appr
 
 After creation, run `verify --cache-root /absolute/notion-library`. Verification reads the typed schema, every page property and Markdown body, and the uniquely tagged Agent Skills plugin back from Notion. Only then does it download the export through the hardened importer and atomically publish the verified local snapshot. Any mismatch leaves the previously selected cache snapshot unchanged.
 
+Notion may serialize equivalent Markdown differently. Verification uses a versioned structural comparator rather than weakening the approved source: it recognizes only documented Notion normalizations for blank lines, a title-matching leading H1, list indentation and continuation wrappers, GFM/Notion tables, formatting wrappers, and `text`/`plain text`/`txt` fence labels. Instruction text, headings, list nesting, table cells, links, code, and duplicate-key-rejected preserved YAML metadata must remain equivalent. The audit receipt records both raw hashes and every normalization rule used for each page and exported skill.
+
 This pilot does not change the canonical warehouse, install imported skills into a harness, execute exported MCP configuration, retire symlinks, or grant broader Notion access.

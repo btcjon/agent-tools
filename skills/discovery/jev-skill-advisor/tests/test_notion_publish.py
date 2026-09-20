@@ -69,15 +69,17 @@ class FakeTransport:
 def archive(plan, *, extra=False, corrupt=False):
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
-        for row in plan["pages"]:
+        plugin = json.dumps({"name": "pilot", "description": ""}).encode()
+        info = tarfile.TarInfo("pilot/plugin.json"); info.size = len(plugin); tar.addfile(info, io.BytesIO(plugin))
+        for index, row in enumerate(plan["pages"]):
             name = row["properties"]["Skill name"]["title"][0]["text"]["content"]
             description = row["properties"]["Description"]["rich_text"][0]["text"]["content"]
             body = "Wrong\n" if corrupt and name == "alpha" else row["markdown"]
-            data = f"---\nname: {name}\ndescription: {description}\n---\n{body}".encode()
-            info = tarfile.TarInfo(f"skills/{name}/SKILL.md"); info.size = len(data); tar.addfile(info, io.BytesIO(data))
+            data = f"---\nname: {name}\ndescription: {description}\nnotion_page_id: page-{index}\n---\n{body}".encode()
+            info = tarfile.TarInfo(f"pilot/skills/{name}/SKILL.md"); info.size = len(data); tar.addfile(info, io.BytesIO(data))
         if extra:
-            data = b"---\nname: delta\ndescription: Extra\n---\nBody\n"
-            info = tarfile.TarInfo("skills/delta/SKILL.md"); info.size = len(data); tar.addfile(info, io.BytesIO(data))
+            data = b"---\nname: delta\ndescription: Extra\nnotion_page_id: page-x\n---\nBody\n"
+            info = tarfile.TarInfo("pilot/skills/delta/SKILL.md"); info.size = len(data); tar.addfile(info, io.BytesIO(data))
     return buffer.getvalue()
 
 

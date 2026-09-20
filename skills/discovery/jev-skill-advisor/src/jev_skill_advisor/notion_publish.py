@@ -9,10 +9,11 @@ import subprocess
 import tempfile
 import time
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
+from .fidelity import FidelityError, compare_markdown
 from .library_cache import LibraryCache, _archive_files, _skill_roots
 from .notion_import import NotionExportClient
 
@@ -80,7 +81,7 @@ def _exported_skill(data):
         raise PublishError("export_invalid_frontmatter") from exc
     if not isinstance(metadata, dict):
         raise PublishError("export_invalid_frontmatter")
-    return metadata.get("name"), metadata.get("description"), text[marker + 5 :].strip("\n") + "\n"
+    return metadata, text[marker + 5 :].strip("\n") + "\n"
 
 
 def load_plan(manifest_path):
@@ -92,7 +93,7 @@ def load_plan(manifest_path):
     destination = manifest.get("destination", {})
     contract = manifest.get("creation_contract", {})
     request = contract.get("database_request")
-    if destination.get("status") != "proposed_pending_authorization" or not isinstance(request, dict):
+    if destination.get("status") not in {"proposed_pending_authorization", "created_and_verified"} or not isinstance(request, dict):
         raise PublishError("unreviewed_destination")
     if request.get("database_type") != "skills" or "initial_data_source" in request:
         raise PublishError("database_must_use_typed_skills_schema")
@@ -271,26 +272,45 @@ def _validate_data_source(source, *, identity, database_id):
         raise PublishError("skills_schema_mismatch")
 
 
-def _validate_export(export, plan):
+def _validate_export(export, plan, page_ids):
     files = _archive_files(export)
     roots = _skill_roots(files)
-    permitted_root = {"plugin.json", "mcp.json"}
     expected = {row["properties"]["Skill name"]["title"][0]["text"]["content"]: row for row in plan["pages"]}
     actual = {}
-    allowed = set(permitted_root)
+    plugin_files = [name for name in files if PurePosixPath(name).name == "plugin.json"]
+    if len(plugin_files) != 1:
+        raise PublishError("export_plugin_manifest_mismatch")
+    prefix = PurePosixPath(plugin_files[0]).parent
+    try:
+        plugin = json.loads(files[plugin_files[0]])
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PublishError("export_plugin_manifest_mismatch") from exc
+    if plugin.get("name") != plan["plugin_tag"]:
+        raise PublishError("export_plugin_manifest_mismatch")
+    allowed = {plugin_files[0], (prefix / "mcp.json").as_posix()}
     for root in roots:
+        if root.parent != prefix / "skills":
+            raise PublishError("export_skill_membership_mismatch")
         skill_path = (root / "SKILL.md").as_posix()
         allowed.add(skill_path)
-        name, description, body = _exported_skill(files[skill_path])
+        metadata, body = _exported_skill(files[skill_path])
+        name, description = metadata.get("name"), metadata.get("description")
         if not isinstance(name, str) or name in actual:
             raise PublishError("export_skill_membership_mismatch")
-        actual[name] = (description, body)
+        actual[name] = (description, metadata.get("notion_page_id"), body)
     if set(files) - allowed or set(actual) != set(expected):
         raise PublishError("export_skill_membership_mismatch")
+    evidence = []
     for name, row in expected.items():
         wanted_description = row["properties"]["Description"]["rich_text"][0]["text"]["content"]
-        if actual[name] != (wanted_description, row["markdown"]):
+        if actual[name][0] != wanted_description or actual[name][1] != page_ids[row["stable_id"]]:
             raise PublishError("export_skill_fidelity_mismatch")
+        try:
+            comparison = compare_markdown(row["markdown"], actual[name][2], title=name, profile="export")
+        except FidelityError as exc:
+            raise PublishError(f"export_skill_fidelity_mismatch:{exc}") from exc
+        evidence.append({"stable_id": row["stable_id"], **comparison})
+    return evidence
 
 
 def apply_plan(plan, *, ack_hash, authorization_path, state_dir, transport=None):
@@ -375,6 +395,7 @@ def verify_plan(plan, *, state_dir, cache_root, transport=None, export_client=No
         ids = {row["stable_id"]: row["page_id"] for row in receipt.get("pages", [])}
         if set(ids) != {row["stable_id"] for row in plan["pages"]}:
             raise PublishError("page_receipt_mismatch")
+        page_evidence = []
         for expected in plan["pages"]:
             page_id = ids[expected["stable_id"]]
             page = transport.get_page(page_id)
@@ -387,16 +408,22 @@ def verify_plan(plan, *, state_dir, cache_root, transport=None, export_client=No
                 "Tags": [plan["plugin_tag"]],
                 "Files": [],
             }
-            if values != wanted or transport.get_page_markdown(page_id) != expected["markdown"]:
+            if values != wanted:
                 raise PublishError("page_readback_mismatch")
+            try:
+                comparison = compare_markdown(expected["markdown"], transport.get_page_markdown(page_id), title=values["Skill name"])
+            except FidelityError as exc:
+                raise PublishError(f"page_readback_mismatch:{exc}") from exc
+            page_evidence.append({"stable_id": expected["stable_id"], **comparison})
         plugins = transport.list_plugins().get("results", [])
         matches = [row for row in plugins if row.get("name") == plan["plugin_tag"]]
         if len(matches) != 1 or not matches[0].get("id"):
             raise PublishError("pilot_plugin_not_uniquely_visible")
         client = export_client or NotionExportClient(runner=lambda path: transport.request(path))
         export = client.fetch("plugin", matches[0]["id"])
-        _validate_export(export, plan)
+        export_evidence = _validate_export(export, plan, ids)
         status = LibraryCache(cache_root).publish([export])
-        receipt.update(status="verified", plugin_id=matches[0]["id"], snapshot_id=status["snapshot_id"])
+        receipt.update(status="verified", plugin_id=matches[0]["id"], snapshot_id=status["snapshot_id"],
+                       fidelity={"page_readback": page_evidence, "export": export_evidence})
         _atomic_json(receipt_path, receipt)
         return receipt
