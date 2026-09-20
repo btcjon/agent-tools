@@ -197,6 +197,16 @@ def test_bulk_create_builds_remote_identity_map_once(tmp_path):
     assert transport.queries==1
 
 
+def test_update_does_not_scan_unrelated_remote_identities(tmp_path):
+    skill(tmp_path,"alpha"); inventory=freeze_inventory(tmp_path); row=inventory["skills"][0]
+    plan=plan_sync(inventory,[{"stable_id":row["stable_id"],"page_id":"page-a","last_synced_hash":"old","remote_hash":"old"}],database_id="db",data_source_id="ds")
+    class StopAfterDestination(FakeTransport):
+        def request(self,path,method="GET",body=None):
+            if path.endswith("/query"): raise AssertionError("update_must_not_scan_catalog")
+            return super().request(path,method,body)
+    with pytest.raises(SyncError): execute_sync(inventory,plan,ledger_path=tmp_path/"ledger.sqlite3",run_id="update",transport=StopAfterDestination())
+
+
 def test_partial_update_resumes_without_reuploading_or_rechecking_old_version(tmp_path):
     skill(tmp_path,"alpha"); inventory=freeze_inventory(tmp_path); row=inventory["skills"][0]
     plan=plan_sync(inventory,[{"stable_id":row["stable_id"],"page_id":"page-a","last_synced_hash":"old","remote_hash":"old"}],database_id="db",data_source_id="ds")

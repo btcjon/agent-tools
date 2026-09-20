@@ -493,7 +493,7 @@ def _execute_sync(inventory,plan,*,ledger,run_id=None,transport=None,limit=None,
     if limit is not None: mutations=mutations[:limit]
     for action in mutations: _verify_frozen_row(rows[action["stable_id"]])
     transport.validate_destination(plan["database_id"],plan["data_source_id"])
-    remote_identities=_remote_identity_map(transport,plan["data_source_id"])
+    remote_identities=_remote_identity_map(transport,plan["data_source_id"]) if any(item["action"]=="create" for item in mutations) else {}
     completed=[]
     try:
         for action in mutations:
