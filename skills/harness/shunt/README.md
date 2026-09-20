@@ -13,8 +13,7 @@ The main model still decides. The main model still edits. It simply gets a map i
 - **Less context waste:** large reads become compact pointers instead of giant prompt payloads.
 - **One shared policy:** a common core with thin adapters for Codex, Cursor, Claude, Pi, Grok, Agy, and Hermes.
 - **Hard safety boundaries:** secret paths are blocked and Shunt cannot act as a coding agent or editor.
-- **Predictable routing:** one locked primary provider and one explicit fallback—never a mystery third model.
-- **Privacy-safe telemetry:** operational outcomes are recorded without file contents or clear file paths.
+- **Predictable routing:** one locked bulk-reader route—never a mystery fallback.
 
 ## How it works
 
@@ -48,9 +47,8 @@ Additional harness adapters and reload requirements are documented in [`referenc
 
 ## Locked provider route
 
-- Primary: direct Z.ai Coding Plan `glm-5.3` using `ZAI_API`.
-- Fallback: Cerebras `gpt-oss-120b` using `CEREBRAS_API_KEY`.
-- A third provider or model is not allowed.
+- Bulk reader: OpenRouter `google/gemini-3.8-flash` using `OPENROUTER_API_KEY`.
+- CAPI Gemini OAuth, `gflash*`, and other fallback routes are not allowed.
 
 ## Not a second decision-maker
 

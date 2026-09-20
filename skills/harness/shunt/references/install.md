@@ -4,7 +4,7 @@
 cd ~/Library/CloudStorage/Dropbox/Projects/agent-tools/skills/harness/shunt
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-cp -n .env.example .env   # set ZAI_API and/or CEREBRAS_API_KEY locally; never commit
+cp -n .env.example .env   # set OPENROUTER_API_KEY locally; never commit
 shunt doctor
 shunt install --dry-run
 # When adapter scripts exist under adapters/<harness>/:

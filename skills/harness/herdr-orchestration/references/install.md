@@ -53,10 +53,12 @@ After load, check without launching workers:
 - Judgment + ordinary routes configured (or honest “missing” status)
 - Shared claims `--state-dir` agreed among coordinators
 - Permission policy understood
+- If using the default `fleet bb`: a separately provisioned `bb-herdr` runtime and worker pool. This package does not install them.
 
 ## 4. Activation (optional)
 
 - Per conversation: `orchestration on|off|status` and `fleet herdr|bb|status` (default fleet **bb**)
+- Herdr-only setup: select `fleet herdr` before dispatch; do not leave the default on `bb` when `bb-herdr` is unavailable.
 - Default-on for future sessions: explicitly merge [CONTRACT-SNIPPET.md](../CONTRACT-SNIPPET.md) into your global contract
 
 ## 5. Offline package verification

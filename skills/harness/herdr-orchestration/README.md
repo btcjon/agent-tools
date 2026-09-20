@@ -35,6 +35,8 @@ Think air-traffic control, not a group chat full of pilots shouting “I got it.
 
 The stock `herdr` skill remains the CLI and product authority. This package governs coordination behavior; it does not replace the Herdr manual.
 
+The policy currently defaults to `fleet bb`. That route requires a separately provisioned `bb-herdr` runtime and worker pool; this package does not install either one. If you have Herdr but not `bb-herdr`, select `fleet herdr` before dispatching work.
+
 ## Install
 
 ```bash
