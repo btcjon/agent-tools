@@ -9,7 +9,7 @@ from html.parser import HTMLParser
 import yaml
 
 
-VERSION = 3
+VERSION = 4
 METADATA_HEADING = "## Preserved source metadata"
 METADATA_NOTICE = "The following metadata is part of the canonical skill contract and remains authoritative for this pilot."
 
@@ -75,7 +75,14 @@ def _metadata_parts(markdown):
 _PROTECTED_INLINE = re.compile(r"(`+)[^`]*\1|\[[^\]]*\]\([^)]*\)")
 
 
+def _notion_autolinks(text):
+    extensions=r"(?:py|sh|js|ts|tsx|jsx|md|txt|json|ya?ml|toml|html?|css)"
+    text=re.sub(rf"([A-Za-z0-9_./-]*?)\[([A-Za-z0-9_.-]+\.{extensions})\]\(http://\2\)",lambda m:m.group(1)+m.group(2),text)
+    return text.replace(r"\~","~")
+
+
 def _inline(text):
+    text=_notion_autolinks(text)
     output = []; cursor = 0
     for match in _PROTECTED_INLINE.finditer(text):
         output.append(re.sub(r"\s+", " ", text[cursor:match.start()]))

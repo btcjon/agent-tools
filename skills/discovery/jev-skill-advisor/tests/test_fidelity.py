@@ -63,13 +63,19 @@ guardrails:
 
 def test_accepts_only_observed_notion_normalizations():
     result = compare_markdown(EXPECTED, NORMALIZED, title="sample-skill")
-    assert result["comparator_version"] == 3
+    assert result["comparator_version"] == 4
     assert {"removed_matching_leading_h1", "notion_html_table", "plain_text_fence_label", "escaped_emphasis_markers"} <= set(result["normalization_rules"])
 
 
 def test_accepts_txt_fence_label_with_exact_code():
     result = compare_markdown(EXPECTED, NORMALIZED.replace("```plain text", "```txt"), title="sample-skill")
     assert "plain_text_fence_label" in result["normalization_rules"]
+
+
+def test_accepts_notion_filename_autolinks_and_escaped_home_marker():
+    expected=EXPECTED.replace("Do **not** change", "Use generic_tool_loop.py and ~/.agents/config. Do **not** change")
+    actual=NORMALIZED.replace("Do not change", "Use generic_tool_[loop.py](http://loop.py) and \\~/.agents/config. Do not change")
+    compare_markdown(expected,actual,title="sample-skill")
 
 
 @pytest.mark.parametrize("changed", [
