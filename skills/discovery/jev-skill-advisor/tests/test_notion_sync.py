@@ -2,7 +2,7 @@ import io,json,tarfile
 from pathlib import Path
 import pytest
 from jev_skill_advisor.notion_import import Export
-from jev_skill_advisor.notion_sync import NtnSyncTransport,SyncError,_bundle_bytes,_generated_manifest,_page_material,_pin_frozen_row,_property_fingerprint,discover_remote,execute_sync,freeze_inventory,managed_marker,parse_managed_marker,plan_sync
+from jev_skill_advisor.notion_sync import NtnSyncTransport,SyncError,_attachment_fingerprint,_bundle_bytes,_generated_manifest,_page_material,_pin_frozen_row,_property_fingerprint,discover_remote,execute_sync,freeze_inventory,managed_marker,parse_managed_marker,plan_sync
 
 
 def skill(root,name,extra=None):
@@ -202,27 +202,31 @@ def test_partial_update_resumes_without_reuploading_or_rechecking_old_version(tm
     plan=plan_sync(inventory,[{"stable_id":row["stable_id"],"page_id":"page-a","last_synced_hash":"old","remote_hash":"old"}],database_id="db",data_source_id="ds")
     operation_id="resume:warehouse:alpha"
     class Partial(FakeTransport):
-        def __init__(self): super().__init__(); self.markdown=_page_material(row,operation_id,"pending")[2]
+        def __init__(self): super().__init__(); self.markdown=_page_material(row,operation_id,"pending")[2]; self.properties={}; self.attachments=_attachment_fingerprint({})
         def request(self,path,method="GET",body=None):
             if path.endswith("/query"): return {"results":[{"id":"page-a"}],"has_more":False}
             if path.endswith("/markdown"): return {"markdown":self.markdown}
             if "/ai/skills/" in path: return {"version_id":"changed-during-owned-update"}
             return {}
         def update_markdown(self,page_id,markdown): self.calls.append(("markdown",page_id)); self.markdown=markdown
-        def update_properties(self,page_id,properties): self.calls.append(("properties",page_id))
+        def update_properties(self,page_id,properties):
+            self.calls.append(("properties",page_id)); self.properties=properties
+            pinned=_pin_frozen_row(row); bundle=_bundle_bytes(row,pinned); manifest=_generated_manifest(row,bundle)
+            self.attachments=_attachment_fingerprint({"package-bundle.txt":bundle,"skill-package.json":manifest})
+        def observe_skill(self,page_id): return {"version":"changed-during-owned-update","markdown":self.markdown,"properties_hash":_property_fingerprint(self.properties),"attachments_hash":self.attachments}
     from jev_skill_advisor.sync_ledger import SyncLedger
     ledger_path=tmp_path/"ledger.sqlite3"; ledger=SyncLedger(ledger_path)
     binding=__import__("jev_skill_advisor.notion_sync",fromlist=["_hash"])._hash({"inventory_hash":inventory["inventory_hash"],"plan_hash":plan["plan_hash"],"database_id":"db","data_source_id":"ds"})
     destination=__import__("jev_skill_advisor.notion_sync",fromlist=["_hash"])._hash({"database_id":"db","data_source_id":"ds"})
     ledger.create_run("resume",source_snapshot_id=binding,destination_id=destination)
     ledger.checkpoint_intent("resume",row["stable_id"],"update",row["desired_hash"],page_id="page-a"); ledger.record_attempt("resume",row["stable_id"],"update")
-    baseline_hash=_property_fingerprint({}); ledger.checkpoint_intent("resume",row["stable_id"],"baseline:properties",baseline_hash); ledger.record_attempt("resume",row["stable_id"],"baseline:properties"); ledger.record_result("resume",row["stable_id"],"baseline:properties",result_id=baseline_hash)
+    baseline_files=_attachment_fingerprint({}); baseline_props=_property_fingerprint({}); ledger.checkpoint_intent("resume",row["stable_id"],"baseline:remote",baseline_files,remote_hash=baseline_props); ledger.record_attempt("resume",row["stable_id"],"baseline:remote"); ledger.record_result("resume",row["stable_id"],"baseline:remote",result_id="old",remote_hash=baseline_props)
     for kind in ("upload:@bundle","upload:skill-package.json"):
         ledger.checkpoint_intent("resume",row["stable_id"],kind,"saved"); ledger.record_attempt("resume",row["stable_id"],kind); ledger.record_result("resume",row["stable_id"],kind,upload_id=f"id-{kind}")
     transport=Partial(); result=execute_sync(inventory,plan,ledger_path=ledger_path,run_id="resume",transport=transport)
     assert result["completed"][0]["page_id"]=="page-a"
     assert not any(call[0]=="upload_bytes" for call in transport.calls)
-    assert [call[0] for call in transport.calls if call[0] in {"markdown","properties"}]==["markdown","properties","markdown"]
+    assert [call[0] for call in transport.calls if call[0] in {"markdown","properties"}]==["properties","markdown"]
 
 
 def test_partial_update_rejects_intervening_human_content_edit(tmp_path):
@@ -274,10 +278,10 @@ def test_partial_update_rejects_intervening_property_or_attachment_edit(tmp_path
     destination=_hash({"database_id":"db","data_source_id":"ds"})
     ledger.create_run("resume",source_snapshot_id=binding,destination_id=destination)
     ledger.checkpoint_intent("resume",row["stable_id"],"update",row["desired_hash"],page_id="page-a"); ledger.record_attempt("resume",row["stable_id"],"update")
-    ledger.checkpoint_intent("resume",row["stable_id"],"baseline:properties","baseline")
-    ledger.record_attempt("resume",row["stable_id"],"baseline:properties"); ledger.record_result("resume",row["stable_id"],"baseline:properties",result_id="baseline")
+    ledger.checkpoint_intent("resume",row["stable_id"],"baseline:remote","baseline",remote_hash="baseline-props")
+    ledger.record_attempt("resume",row["stable_id"],"baseline:remote"); ledger.record_result("resume",row["stable_id"],"baseline:remote",result_id="old")
     transport=Edited()
-    with pytest.raises(SyncError,match="partial_update_properties_changed"):
+    with pytest.raises(SyncError,match="partial_update_remote_changed"):
         execute_sync(inventory,plan,ledger_path=ledger_path,run_id="resume",transport=transport)
     assert not any(call[0] in {"markdown","properties"} for call in transport.calls)
 

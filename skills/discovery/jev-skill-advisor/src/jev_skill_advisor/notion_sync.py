@@ -204,6 +204,23 @@ class NtnSyncTransport:
         expected_marker=parse_managed_marker(expected_markdown); actual_marker=parse_managed_marker(body)
         if not expected_marker or actual_marker!=expected_marker: raise SyncError("export_skill_marker_mismatch")
         return export.version_id
+    def observe_skill(self,page_id):
+        before=self.request(f"v1/ai/skills/{page_id}").get("version_id")
+        page=self.request(f"v1/pages/{page_id}"); markdown=self.request(f"v1/pages/{page_id}/markdown").get("markdown","")
+        client=NotionExportClient(runner=lambda path:self.request(path),max_archive_bytes=600_000_000)
+        export=client.fetch("skill",page_id)
+        after=self.request(f"v1/ai/skills/{page_id}").get("version_id")
+        if not before or before!=export.version_id or before!=after: raise SyncError("inconsistent_remote_observation")
+        files=_archive_entries(export); roots=_package_roots(files)
+        if len(roots)!=1: raise SyncError("export_membership_mismatch")
+        root=roots[0]; attachments={}
+        for name,entry in files.items():
+            path=PurePosixPath(name)
+            if root not in path.parents: continue
+            relative=path.relative_to(root).as_posix()
+            if relative!="SKILL.md": attachments[relative]=entry["data"]
+        return {"version":before,"markdown":markdown,"properties_hash":_property_fingerprint(page.get("properties",{})),
+            "attachments_hash":_attachment_fingerprint(attachments)}
 
     def validate_destination(self,database_id,data_source_id):
         data=self.request(f"v1/data_sources/{data_source_id}")
@@ -432,9 +449,21 @@ def _property_fingerprint(properties):
     files=properties.get("Files",{}); files=files.get("files",[]) if isinstance(files,dict) else []
     normalized={"name":text("Skill name","title"),"description":text("Description","rich_text"),
         "tags":sorted(item.get("name","") for item in tags if isinstance(item,dict)),
-        "files":sorted((item.get("name",""),item.get("type",""),
-            (item.get("file_upload") or {}).get("id","") if isinstance(item.get("file_upload"),dict) else "") for item in files if isinstance(item,dict))}
+        "files":sorted(item.get("name","") for item in files if isinstance(item,dict))}
     return _hash(normalized)
+
+
+def _attachment_fingerprint(files):
+    return _hash([{"path":path,"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()} for path,data in sorted(files.items())])
+
+
+def _observe(transport,page_id):
+    if hasattr(transport,"observe_skill"): return transport.observe_skill(page_id)
+    page=transport.request(f"v1/pages/{page_id}")
+    return {"version":transport.request(f"v1/ai/skills/{page_id}").get("version_id"),
+        "markdown":transport.request(f"v1/pages/{page_id}/markdown").get("markdown",""),
+        "properties_hash":_property_fingerprint(page.get("properties",{})),
+        "attachments_hash":page.get("attachments_hash",_attachment_fingerprint({}))}
 
 
 def execute_sync(inventory,plan,*,ledger_path,run_id=None,transport=None,limit=None,only_ids=None):
@@ -495,14 +524,14 @@ def _execute_sync(inventory,plan,*,ledger,run_id=None,transport=None,limit=None,
                 marker=parse_managed_marker(transport.request(f"v1/pages/{action['page_id']}/markdown").get("markdown","")) if prior else None
                 owned_partial=bool(marker and marker.get("operation_id")==operation_id)
                 if not owned_partial and live.get("version_id")!=action.get("expected_remote_hash"): raise SyncError("remote_changed_before_update")
-                baseline_kind="baseline:properties"; baseline=ledger.operation(run_id,row["stable_id"],baseline_kind)
+                baseline_kind="baseline:remote"; baseline=ledger.operation(run_id,row["stable_id"],baseline_kind)
                 if baseline is None:
                     if prior: raise SyncError("missing_property_baseline")
-                    page=transport.request(f"v1/pages/{action['page_id']}")
-                    baseline_hash=_property_fingerprint(page.get("properties",{}))
-                    ledger.checkpoint_intent(run_id,row["stable_id"],baseline_kind,baseline_hash)
+                    state=_observe(transport,action["page_id"])
+                    if state["version"]!=action.get("expected_remote_hash"): raise SyncError("remote_changed_before_update")
+                    ledger.checkpoint_intent(run_id,row["stable_id"],baseline_kind,state["attachments_hash"],remote_hash=state["properties_hash"])
                     ledger.record_attempt(run_id,row["stable_id"],baseline_kind)
-                    baseline=ledger.record_result(run_id,row["stable_id"],baseline_kind,result_id=baseline_hash)
+                    baseline=ledger.record_result(run_id,row["stable_id"],baseline_kind,result_id=state["version"],remote_hash=state["properties_hash"])
                 elif baseline["status"]!="complete": raise SyncError("ambiguous_property_baseline")
             else:
                 existing_page=remote_identities.get(row["stable_id"])
@@ -533,9 +562,16 @@ def _execute_sync(inventory,plan,*,ledger,run_id=None,transport=None,limit=None,
                     "Description":{"type":"rich_text","rich_text":[{"type":"text","text":{"content":description}}]},
                     "Tags":{"type":"multi_select","multi_select":[{"name":row["plugin_tag"]}]},"Files":{"type":"files","files":uploads}}
                 if kind=="update":
-                    observed=transport.request(f"v1/pages/{action['page_id']}")
-                    observed_hash=_property_fingerprint(observed.get("properties",{})); intended_hash=_property_fingerprint(properties)
-                    if observed_hash not in {baseline["desired_hash"],intended_hash}: raise SyncError("partial_update_properties_changed")
+                    observed=_observe(transport,action["page_id"]); intended_props=_property_fingerprint(properties)
+                    intended_files=_attachment_fingerprint({"package-bundle.txt":bundle_data,"skill-package.json":manifest_data})
+                    pending=_page_material(row,operation_id,"pending",source_data=source_data)[2]
+                    if prior:
+                        try: compare_markdown(pending,observed["markdown"],title=row["name"],profile="page")
+                        except FidelityError as exc: raise SyncError("partial_update_content_changed") from exc
+                        allowed={(baseline["desired_hash"],baseline["remote_hash"]),(intended_files,intended_props)}
+                        if (observed["attachments_hash"],observed["properties_hash"]) not in allowed: raise SyncError("partial_update_remote_changed")
+                    elif (observed["version"]!=baseline["result_id"] or observed["attachments_hash"]!=baseline["desired_hash"] or observed["properties_hash"]!=baseline["remote_hash"]):
+                        raise SyncError("remote_changed_during_uploads")
                 if kind=="create":
                     try: page_id=transport.create_page({"parent":{"type":"data_source_id","data_source_id":plan["data_source_id"]},"properties":properties,"markdown":markdown}).get("id")
                     except SyncError:
@@ -544,8 +580,19 @@ def _execute_sync(inventory,plan,*,ledger,run_id=None,transport=None,limit=None,
                     remote_identities[row["stable_id"]]=page_id
                 else:
                     page_id=action["page_id"]
-                    pending=_page_material(row,operation_id,"pending")[2]
-                    transport.update_markdown(page_id,pending); transport.update_properties(page_id,properties); transport.update_markdown(page_id,markdown)
+                    pending=_page_material(row,operation_id,"pending",source_data=source_data)[2]
+                    if not prior: transport.update_markdown(page_id,pending)
+                    phase=_observe(transport,page_id)
+                    try: compare_markdown(pending,phase["markdown"],title=row["name"],profile="page")
+                    except FidelityError as exc: raise SyncError("pending_phase_mismatch") from exc
+                    if phase["attachments_hash"]==baseline["desired_hash"] and phase["properties_hash"]==baseline["remote_hash"]:
+                        transport.update_properties(page_id,properties)
+                    elif (phase["attachments_hash"],phase["properties_hash"])!=(intended_files,intended_props): raise SyncError("unknown_update_phase")
+                    phase=_observe(transport,page_id)
+                    try: compare_markdown(pending,phase["markdown"],title=row["name"],profile="page")
+                    except FidelityError as exc: raise SyncError("pending_phase_changed") from exc
+                    if (phase["attachments_hash"],phase["properties_hash"])!=(intended_files,intended_props): raise SyncError("updated_properties_mismatch")
+                    transport.update_markdown(page_id,markdown)
                 if not page_id: raise SyncError("page_identity_missing")
                 version=transport.verify_skill(row,page_id,markdown,bundle_data,manifest_data)
                 ledger.record_result(run_id,row["stable_id"],kind,page_id=page_id,remote_hash=version,result_id=version); completed.append({"stable_id":row["stable_id"],"page_id":page_id,"action":kind})
