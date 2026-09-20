@@ -13,6 +13,7 @@ skill-advisor-service = "jev_skill_advisor.service_cli:main"
 skill-advisor-mcp = "jev_skill_advisor.mcp_server:main"
 skill-advisor-admin = "jev_skill_advisor.admin_cli:main"
 skill-advisor-catalog = "jev_skill_advisor.catalog_cli:main"
+skill-library = "jev_skill_advisor.library_cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
