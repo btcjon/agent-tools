@@ -14,6 +14,8 @@ node --input-type=module -e 'import {pathToFileURL} from "node:url"; console.log
 
 Set that value as `HERMES_PICKER_ADAPTER_MODULE`. Configuration examples are not loaded automatically.
 
+To enable selected-skill delivery before Hermes generation, set `HERMES_PICKER_SKILL_INJECTION=true` and `HERMES_PICKER_SKILL_PROFILE` to a reviewed host-local profile, then restart the router service. Set the flag to `false` and restart to disable it. Timeout, cancellation, uncertainty, invalid output, database failure, or oversized bodies preserve the original user request and fall back to native discovery; aggregate mapping telemetry records IDs and counts, never task or body content.
+
 ## 2. Request handler hook
 
 Back up the router files outside the public repository. In `src/router.mjs`, immediately after `requestedModel` is assigned from the decoded payload, and before registered-model lookup, insert:

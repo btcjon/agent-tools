@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { HermesClient, parseAllowedSessions, validateSessionId } from "./hermes-client.mjs";
 import { copyRemoteArtifact, createSshHermesClient } from "./hermes-picker-ssh.mjs";
+import { attachPreparedSkills, createPrepareContextClient } from "../../../discovery/jev-skill-advisor/adapters/node/prepare-context.mjs";
 
 export const HERMES_PICKER_SLUG = "hermes-vps/agent";
 export const HERMES_PICKER_MODEL = "hermes-vps-agent";
@@ -12,6 +13,7 @@ export const STORE_LOCK_NOTE = "Single-process adapter plus file lock serializes
 const TASK_ID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const DEFAULT_TIMEOUT_MS = 240000;
 const FILE_COPY_MAX_BYTES = 2 * 1024 * 1024;
+const HERMES_MESSAGE_MAX_CHARS = 20000;
 const UNSUPPORTED_PARTS = new Set(["input_image", "input_file", "image_url", "file"]);
 
 export function isHermesPickerModel(model) {
@@ -41,6 +43,11 @@ export function configFromEnv(env = process.env) {
     remoteBaseUrl: env.HERMES_PICKER_REMOTE_BASE_URL || "http://127.0.0.1:8766",
     remoteEnvPath: env.HERMES_PICKER_REMOTE_ENV_PATH || "~/.hermes/.env",
     allowedArtifactRoots,
+    skillInjectionEnabled: String(env.HERMES_PICKER_SKILL_INJECTION || "false") === "true",
+    skillAdvisorProfile: env.HERMES_PICKER_SKILL_PROFILE || "",
+    skillAdvisorExecutable: env.HERMES_PICKER_SKILL_EXECUTABLE || "skill-advisor-service",
+    skillAdvisorTimeoutMs: Number(env.HERMES_PICKER_SKILL_TIMEOUT_MS || 7000),
+    skillBodyMaxBytes: Number(env.HERMES_PICKER_SKILL_BODY_MAX_BYTES || 32768),
   };
   if (transport === "http") {
     const baseUrl = env.HERMES_PICKER_BASE_URL || env.HERMES_BASE_URL || "http://127.0.0.1:8766";
@@ -118,6 +125,21 @@ export function requestIdentity(headers = {}, payload = {}) {
   };
 }
 
+export function trustedSkillContext(prepared, outboundMessage) {
+  if (!prepared || !["suggested", "explicit_selection"].includes(prepared.status)
+      || !prepared.receipt_id || !Array.isArray(prepared.skills) || prepared.skills.length === 0) return null;
+  const selectedIds = prepared.skills.map((skill) => skill.id);
+  if (selectedIds.some((id) => typeof id !== "string" || !id)
+      || prepared.skills.some((skill) => typeof skill.content_hash !== "string" || !/^[a-f0-9]{64}$/.test(skill.content_hash))) return null;
+  return {
+    version: 1,
+    receipt_id: prepared.receipt_id,
+    selected_ids: selectedIds,
+    body_hashes: Object.fromEntries(prepared.skills.map((skill) => [skill.id, skill.content_hash])),
+    message_sha256: createHash("sha256").update(outboundMessage.trim(), "utf8").digest("hex"),
+  };
+}
+
 function firstString(...values) {
   return values.find((value) => typeof value === "string" && value.trim()) || null;
 }
@@ -150,6 +172,10 @@ export function extractNewUserText(payload) {
     return messageText(item);
   }
   throw new Error("Hermes picker found no new user message to dispatch.");
+}
+
+export function explicitSkillsFromText(text) {
+  return [...new Set([...String(text).matchAll(/(?:^|\s)\$([A-Za-z0-9][A-Za-z0-9._-]{0,63})\b/g)].map((match) => match[1]))];
 }
 
 function messageText(item) {
@@ -257,6 +283,10 @@ export class HermesPickerAdapter {
       : options.copyFile;
     this.activeTasks = new Map();
     this.activeSessions = new Map();
+    this.skillPreparer = options.skillPreparer || (this.config.skillInjectionEnabled ? createPrepareContextClient({
+      executable: this.config.skillAdvisorExecutable, profile: this.config.skillAdvisorProfile,
+      timeoutMs: this.config.skillAdvisorTimeoutMs, maxBodyBytes: this.config.skillBodyMaxBytes,
+    }) : null);
   }
 
   _defaultClient(options) {
@@ -377,7 +407,8 @@ export class HermesPickerAdapter {
         if (prepared.result.create) {
           const created = await this.client.request("/api/sessions", {
             method: "POST",
-            body: { title: `Codex ${taskId.slice(0, 8)}`.slice(0, 120), source: "api_server" },
+            body: { title: `Codex ${taskId.slice(0, 8)}`.slice(0, 120), source: "api_server",
+              ...(this.skillPreparer ? { skill_catalog_policy: "jev" } : {}) },
             signal,
           });
           sessionId = created?.session?.id;
@@ -398,7 +429,20 @@ export class HermesPickerAdapter {
           });
         }
         this.client.allowedSessions.add(sessionId);
-        const result = await this.client.continueSession(sessionId, message, { signal });
+        let outboundMessage = message;
+        let skillContext = null;
+        if (this.skillPreparer) {
+          skillContext = await this.skillPreparer({ task: message, harness: "hermes", session_id: sessionId,
+            explicit_skills: explicitSkillsFromText(message) }, signal);
+          outboundMessage = attachPreparedSkills(message, skillContext);
+          if (outboundMessage.trim().length > HERMES_MESSAGE_MAX_CHARS) {
+            outboundMessage = message;
+            skillContext = { ...skillContext, status: "unavailable", selected_ids: [], skills: [], body_bytes: 0,
+              fallback: "transport_limit" };
+          }
+        }
+        const trustedContext = trustedSkillContext(skillContext, outboundMessage);
+        const result = await this.client.continueSession(sessionId, outboundMessage, { signal, skillContext: trustedContext });
         const effectiveSessionId = result.sessionId || sessionId;
         this.client.allowedSessions.add(effectiveSessionId);
         const text = String(result.content || "");
@@ -410,6 +454,10 @@ export class HermesPickerAdapter {
           mapping.lastContent = text;
           mapping.pending = null;
           mapping.updatedAt = new Date().toISOString();
+          mapping.skillContext = skillContext ? { receiptId: skillContext.receipt_id || null,
+            selectedIds: skillContext.selected_ids || [], attempts: skillContext.telemetry?.provider_attempts || 0,
+            latencyMs: skillContext.telemetry?.elapsed_ms || 0, bodyBytes: skillContext.body_bytes || 0,
+            fallback: skillContext.fallback || null } : null;
           store.sessions[effectiveSessionId] = store.sessions[effectiveSessionId] || { tasks: [] };
           if (!store.sessions[effectiveSessionId].tasks.includes(taskId)) store.sessions[effectiveSessionId].tasks.push(taskId);
         });

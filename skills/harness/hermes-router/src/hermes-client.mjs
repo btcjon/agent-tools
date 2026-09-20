@@ -156,13 +156,13 @@ export class HermesClient {
     }));
   }
 
-  async continueSession(sessionId, message, { signal } = {}) {
+  async continueSession(sessionId, message, { signal, skillContext } = {}) {
     this.assertAllowed(sessionId);
     let data;
     try {
       data = await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/chat`, {
         method: "POST",
-        body: { message: boundedText(message) },
+        body: { message: boundedText(message), ...(skillContext ? { skill_context: skillContext } : {}) },
         signal,
       });
     } catch (error) {
