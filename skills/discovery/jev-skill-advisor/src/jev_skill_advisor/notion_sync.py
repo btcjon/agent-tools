@@ -266,7 +266,7 @@ def discover_remote(data_source_id, *, transport=None, bootstrap=None):
 def verify_remote_receipts(inventory,remote_rows,*,transport=None):
     transport=transport or NtnSyncTransport(); rows={row["stable_id"]:row for row in inventory.get("skills",[])}; verified=[]
     for remote in remote_rows:
-        result=dict(remote); row=rows.get(remote.get("stable_id"))
+        result={**remote,"last_synced_hash":None,"verified_receipt":False}; row=rows.get(remote.get("stable_id"))
         if (row and remote.get("verified_receipt") is True and remote.get("last_synced_hash")==remote.get("remote_hash")
                 and remote.get("verified_hash")==row["desired_hash"]):
             markdown=transport.request(f"v1/pages/{remote['page_id']}/markdown").get("markdown","")

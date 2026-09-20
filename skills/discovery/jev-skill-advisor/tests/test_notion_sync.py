@@ -2,7 +2,7 @@ import io,json,tarfile
 from pathlib import Path
 import pytest
 from jev_skill_advisor.notion_import import Export
-from jev_skill_advisor.notion_sync import NtnSyncTransport,SyncError,_attachment_fingerprint,_bundle_bytes,_generated_manifest,_page_material,_pin_frozen_row,_property_fingerprint,discover_remote,execute_sync,freeze_inventory,managed_marker,parse_managed_marker,plan_sync
+from jev_skill_advisor.notion_sync import NtnSyncTransport,SyncError,_attachment_fingerprint,_bundle_bytes,_generated_manifest,_page_material,_pin_frozen_row,_property_fingerprint,discover_remote,execute_sync,freeze_inventory,managed_marker,parse_managed_marker,plan_sync,verify_remote_receipts
 
 
 def skill(root,name,extra=None):
@@ -137,6 +137,21 @@ def test_bootstrap_observation_cannot_self_bless_on_second_discovery():
     first=discover_remote("ds",transport=Remote())
     second=discover_remote("ds",transport=Remote(),bootstrap=first)
     assert second[0]["last_synced_hash"] is None and second[0]["verified_receipt"] is False
+
+
+def test_failed_receipt_reverification_clears_prior_trust(tmp_path):
+    skill(tmp_path,"alpha"); inventory=freeze_inventory(tmp_path); row=inventory["skills"][0]
+    remote={"stable_id":row["stable_id"],"page_id":"p","verified_hash":row["desired_hash"],
+        "remote_hash":"v1","last_synced_hash":"v1","verified_receipt":True}
+    class Broken(FakeTransport):
+        def request(self,path,method="GET",body=None):
+            if path.endswith("/markdown"): return {"markdown":managed_marker(row["stable_id"],row["desired_hash"],"op")}
+            return super().request(path,method,body)
+        def verify_skill(self,*args,**kwargs): raise SyncError("export_resource_mismatch")
+    result=verify_remote_receipts(inventory,[remote],transport=Broken())[0]
+    assert result["verified_receipt"] is False and result["last_synced_hash"] is None
+    plan=plan_sync(inventory,[result],database_id="db",data_source_id="ds")
+    assert plan["counts"]["conflict"]==1 and plan["counts"]["unchanged"]==0
 
 
 def test_added_file_and_plan_tampering_stop_before_mutation(tmp_path):
