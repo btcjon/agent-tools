@@ -1,0 +1,40 @@
+{
+  "slug": "hermes-vps/agent",
+  "display_name": "Hermes (VPS)",
+  "description": "Your persistent VPS Hermes agent. Model, tools and reasoning are managed by Hermes.",
+  "visibility": "list",
+  "priority": 5,
+  "supported_in_api": true,
+  "default_reasoning_level": "none",
+  "supported_reasoning_levels": [
+    {
+      "effort": "none",
+      "description": "Managed by Hermes"
+    }
+  ],
+  "base_instructions": "Relay user messages to the connected Hermes session.",
+  "model_messages": null,
+  "include_skills_usage_instructions": false,
+  "include_plugin_usage_instructions": false,
+  "include_apps_usage_instructions": false,
+  "supports_search_tool": false,
+  "supports_parallel_tool_calls": false,
+  "experimental_supported_tools": [],
+  "apply_patch_tool_type": null,
+  "input_modalities": [
+    "text"
+  ],
+  "prefer_websockets": false,
+  "context_window": 128000,
+  "max_context_window": 128000,
+  "auto_compact_token_limit": 110000,
+  "comp_hash": "hermes-picker-prototype-v1",
+  "availability_nux": null,
+  "upgrade": null,
+  "additional_speed_tiers": [],
+  "service_tiers": [],
+  "default_service_tier": null,
+  "supports_reasoning_summaries": false,
+  "default_reasoning_summary": "none",
+  "multi_agent_version": "v1"
+}

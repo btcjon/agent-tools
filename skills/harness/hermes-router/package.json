@@ -1,0 +1,19 @@
+{
+  "name": "@btcjon/hermes-router",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Persistent Hermes Agent sessions in Codex through codex-router",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/btcjon/custom-skills.git",
+    "directory": "skills/harness/hermes-router"
+  }
+}

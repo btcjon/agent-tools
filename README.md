@@ -15,6 +15,7 @@ skill in that class lands. Do not dump new skills at the repo root.
 | [proactive-skill-suggestor](skills/discovery/proactive-skill-suggestor/) | discovery | High-bar Skills Hub scout from recent Hermes work. Suggest-only. Upgrade similar local skills instead of installing duplicates. |
 | [jev-skill-advisor](skills/discovery/jev-skill-advisor/) | discovery | Harness-neutral Jev selection service with CLI/MCP adapters, hash-bound reads, and host-local SQLite evidence. |
 | [gmail-triage](skills/email/gmail-triage/) | email | Portable Gmail triage, sender cleanup, unsubscribe, undo, and mailbox health through Composio-managed authentication. |
+| [hermes-router](skills/harness/hermes-router/) | harness | Persistent remote Hermes sessions in Codex Desktop; requires codex-router and local request/catalog hooks. |
 | [shunt](skills/harness/shunt/) | harness | Gate oversized file reads; OpenRouter `google/gemini-3.8-flash` returns points-only so the main model decides/edits. Shared core + thin harness adapters. |
 
 Related (separate repository — install from there, not mirrored here):
