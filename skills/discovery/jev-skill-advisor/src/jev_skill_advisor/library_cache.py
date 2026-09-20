@@ -90,22 +90,30 @@ def _skill_roots(files):
     return roots
 
 
+def _package_roots(files):
+    roots=_skill_roots(files)
+    return [root for root in roots if not any(parent!=root and parent in root.parents for parent in roots)]
+
+
 def _package_metadata(root, selected, export):
     raw = selected.get("skill-package.json")
     if raw is None:
         return {"schema_version": 1, "stable_id": f"warehouse:{root.name}", "aliases": [],
                 "entrypoint": "SKILL.md", "invocation_policy": "source",
-                "required_runtimes": [], "executable_paths": [], "notion_id": export.id, "notion_version_id": export.version_id}
+                "required_runtimes": [], "executable_paths": [], "attachment_paths": {},
+                "canonical_skill_attachment": None,"bundle_attachment":None,"bundle_files":[],
+                "notion_id": export.id, "notion_version_id": export.version_id}
     try:
         value = json.loads(raw["data"].decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise LibraryCacheError("invalid_package_manifest") from exc
     required = {"schema_version", "stable_id", "entrypoint", "invocation_policy"}
-    allowed = required | {"aliases", "required_runtimes", "executable_paths"}
+    allowed = required | {"aliases", "required_runtimes", "executable_paths", "attachment_paths", "canonical_skill_attachment",
+                          "bundle_attachment","bundle_sha256","bundle_bytes","bundle_files"}
     if not isinstance(value, dict) or set(value) - allowed or not required <= set(value) or value["schema_version"] != 1:
         raise LibraryCacheError("invalid_package_manifest")
     stable_id = value["stable_id"]
-    if not isinstance(stable_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", stable_id):
+    if not isinstance(stable_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}", stable_id):
         raise LibraryCacheError("invalid_package_identity")
     entrypoint = PurePosixPath(value["entrypoint"] if isinstance(value["entrypoint"], str) else "")
     if entrypoint.is_absolute() or ".." in entrypoint.parts or entrypoint.as_posix() not in selected:
@@ -116,14 +124,34 @@ def _package_metadata(root, selected, export):
     if any(not isinstance(items, list) or any(not isinstance(item, str) or not item for item in items)
            for items in (aliases, runtimes, executables)):
         raise LibraryCacheError("invalid_package_manifest")
+    attachment_paths=value.get("attachment_paths",{})
+    if not isinstance(attachment_paths,dict): raise LibraryCacheError("invalid_attachment_paths")
+    bundle_files=value.get("bundle_files",[])
+    bundle_paths={item.get("path") for item in bundle_files if isinstance(item,dict)}
     executable_paths=[]
     for item in executables:
         path=PurePosixPath(item)
-        if path.is_absolute() or ".." in path.parts or path.as_posix() not in selected: raise LibraryCacheError("invalid_executable_path")
+        if path.is_absolute() or ".." in path.parts or (path.as_posix() not in selected and path.as_posix() not in attachment_paths.values() and path.as_posix() not in bundle_paths): raise LibraryCacheError("invalid_executable_path")
         executable_paths.append(path.as_posix())
     if value["invocation_policy"] not in {"implicit", "explicit", "source"}:
         raise LibraryCacheError("invalid_invocation_policy")
+    for exported,original in attachment_paths.items():
+        source=PurePosixPath(exported) if isinstance(exported,str) else PurePosixPath("")
+        target=PurePosixPath(original) if isinstance(original,str) else PurePosixPath("")
+        if (not exported or source.is_absolute() or len(source.parts)!=1 or exported not in selected or
+                not original or target.is_absolute() or ".." in target.parts or target.as_posix() in {"SKILL.md","skill-package.json"}):
+            raise LibraryCacheError("invalid_attachment_paths")
+    canonical=value.get("canonical_skill_attachment")
+    if canonical is not None and (not isinstance(canonical,str) or PurePosixPath(canonical).name!=canonical or canonical not in selected):
+        raise LibraryCacheError("invalid_canonical_skill_attachment")
+    bundle=value.get("bundle_attachment")
+    if bundle is not None:
+        if (not isinstance(bundle,str) or PurePosixPath(bundle).name!=bundle or bundle not in selected or
+                not isinstance(value.get("bundle_sha256"),str) or not isinstance(value.get("bundle_bytes"),int) or
+                not isinstance(bundle_files,list)): raise LibraryCacheError("invalid_bundle_manifest")
     return {**value, "aliases": aliases, "required_runtimes": runtimes, "executable_paths": executable_paths,
+            "attachment_paths":attachment_paths,"canonical_skill_attachment":canonical,
+            "bundle_attachment":bundle,"bundle_files":bundle_files,
             "entrypoint": entrypoint.as_posix(), "notion_id": export.id, "notion_version_id": export.version_id}
 
 
@@ -201,7 +229,7 @@ class LibraryCache:
         return {"status": "ready", "snapshot_id": identity, "skill_count": manifest["skill_count"],
                 "export_count": len(manifest["exports"]), "catalog_root": str(self.snapshots / identity / "skills")}
 
-    def publish(self, exports):
+    def publish(self, exports, *, activate=True):
         exports = list(exports)
         if not 1 <= len(exports) <= self.max_exports:
             raise LibraryCacheError("export_count_out_of_bounds")
@@ -211,8 +239,8 @@ class LibraryCache:
         assembled = {}; assembled_folded=set(); packages=[]; package_ids=set(); alias_ids=set()
         export_rows = []
         for export in sorted(exports, key=lambda item: (item.kind, item.id)):
-            files = _archive_entries(export)
-            roots = _skill_roots(files)
+            files = _archive_entries(export,max_expanded_bytes=600_000_000)
+            roots = _package_roots(files)
             archive_hash = hashlib.sha256(export.archive).hexdigest()
             export_file_rows=[]
             for name,data in sorted(files.items()):
@@ -224,6 +252,24 @@ class LibraryCache:
                 if "SKILL.md" not in selected:
                     raise LibraryCacheError("missing_skill_md")
                 package = _package_metadata(source_root, selected, export)
+                bundle=package["bundle_attachment"]
+                if bundle is not None:
+                    payload=selected[bundle]["data"]
+                    if len(payload)!=package["bundle_bytes"] or hashlib.sha256(payload).hexdigest()!=package["bundle_sha256"]: raise LibraryCacheError("bundle_hash_mismatch")
+                    expanded=sum(item.get("bytes",0) for item in package["bundle_files"] if isinstance(item,dict))
+                    overhead=max(10_000_000,len(package["bundle_files"])*4096)
+                    entries=_archive_entries(Export("skill","bundle","0"*64,payload),max_files=len(package["bundle_files"])+10,
+                                             max_expanded_bytes=min(1_000_000_000,expanded+overhead))
+                    expected={item["path"]:(item["sha256"],item["bytes"],item["mode"]) for item in package["bundle_files"]}
+                    actual={name:(hashlib.sha256(item["data"]).hexdigest(),len(item["data"]),item["mode"]) for name,item in entries.items()}
+                    if actual!=expected or "SKILL.md" not in entries: raise LibraryCacheError("bundle_content_mismatch")
+                    transport_manifest=selected["skill-package.json"]
+                    selected={**entries,"skill-package.json":transport_manifest}
+                canonical=package["canonical_skill_attachment"]
+                if canonical is not None: selected["SKILL.md"]=selected.pop(canonical)
+                for exported,original in package["attachment_paths"].items():
+                    if original in selected and original!=exported: raise LibraryCacheError("duplicate_attachment_target")
+                    selected[original]=selected.pop(exported)
                 for executable in package["executable_paths"]: selected[executable]["mode"]=0o755
                 if "skill-package.json" in selected:
                     slug=re.sub(r"[^A-Za-z0-9._-]+","-",package["stable_id"]).strip("-._") or "skill"
@@ -287,6 +333,18 @@ class LibraryCache:
                     shutil.rmtree(staging, ignore_errors=True)
                     if published: shutil.rmtree(destination,ignore_errors=True)
                     raise
+            if activate:
+                self._point_to(snapshot_id)
+                return self._status_unlocked()
+            manifest=self._verify(snapshot_id)
+            return {"status":"staged","snapshot_id":snapshot_id,"skill_count":manifest["skill_count"],
+                    "export_count":len(manifest["exports"]),"catalog_root":str(destination/"skills")}
+
+    def stage(self,exports):
+        return self.publish(exports,activate=False)
+
+    def promote(self,snapshot_id):
+        with self._lock():
             self._point_to(snapshot_id)
             return self._status_unlocked()
 

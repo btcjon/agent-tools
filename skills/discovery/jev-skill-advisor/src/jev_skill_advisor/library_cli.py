@@ -30,19 +30,22 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="skill-library")
     parser.add_argument("--config", type=Path, required=True)
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("inspect"); commands.add_parser("pull"); commands.add_parser("status")
+    commands.add_parser("inspect"); commands.add_parser("pull"); commands.add_parser("stage"); commands.add_parser("status")
+    promote = commands.add_parser("promote"); promote.add_argument("snapshot_id")
     rollback = commands.add_parser("rollback"); rollback.add_argument("snapshot_id")
     args = parser.parse_args(argv)
     state, allowlist = _config(args.config); cache = LibraryCache(state)
     if args.command == "status":
         result = cache.status()
-    elif args.command == "rollback":
-        result = cache.rollback(args.snapshot_id)
+    elif args.command in {"rollback", "promote"}:
+        result = cache.rollback(args.snapshot_id) if args.command == "rollback" else cache.promote(args.snapshot_id)
     else:
-        client = NotionExportClient()
+        client = NotionExportClient(max_archive_bytes=600_000_000)
         if args.command == "inspect":
             result = {"exports": [{key: value for key, value in client.inspect(kind, identity).items() if key != "url"}
                                   for kind, identity in allowlist]}
+        elif args.command == "stage":
+            result = cache.stage(client.fetch(kind, identity) for kind, identity in allowlist)
         else:
             result = cache.publish(client.fetch(kind, identity) for kind, identity in allowlist)
     print(json.dumps(result, sort_keys=True)); return 0

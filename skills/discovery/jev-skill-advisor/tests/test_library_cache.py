@@ -55,6 +55,17 @@ class LibraryCacheTests(unittest.TestCase):
             restored=cache.rollback(first["snapshot_id"])
             self.assertEqual(restored["snapshot_id"],first["snapshot_id"])
 
+    def test_stage_is_immutable_and_does_not_change_current_until_promoted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache=LibraryCache(Path(directory)/"cache"); first=cache.publish([export(1),export(2),export(3)])
+            changed=export(1,b"---\nname: skill-1\ndescription: Staged.\n---\n")
+            changed=Export(changed.kind,changed.id,"e"*64,changed.archive)
+            staged=cache.stage([changed,export(2),export(3)])
+            self.assertEqual(staged["status"],"staged")
+            self.assertEqual(cache.status()["snapshot_id"],first["snapshot_id"])
+            promoted=cache.promote(staged["snapshot_id"])
+            self.assertEqual(promoted["snapshot_id"],staged["snapshot_id"])
+
     def test_failed_import_preserves_current_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
             cache=LibraryCache(Path(directory)/"cache"); first=cache.publish([export(1),export(2),export(3)])
@@ -141,24 +152,23 @@ class LibraryCacheTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             package={"schema_version":1,"stable_id":"shared:outer","aliases":["warehouse:old-outer"],
                      "entrypoint":"SKILL.md","invocation_policy":"implicit","required_runtimes":["python3"],
-                     "executable_paths":["scripts/check.sh"]}
+                     "executable_paths":["scripts/check.sh"],"attachment_paths":{"resource-script.sh":"scripts/check.sh"}}
             nested={"schema_version":1,"stable_id":"shared:nested","entrypoint":"SKILL.md",
                     "invocation_policy":"explicit","required_runtimes":[]}
             files={"bundle/outer/SKILL.md":b"---\nname: outer\ndescription: Outer.\n---\nSee scripts/check.sh\n",
                    "bundle/outer/skill-package.json":json.dumps(package).encode(),
-                   "bundle/outer/scripts/check.sh":b"#!/bin/sh\nprintf package-ok\n",
+                   "bundle/outer/resource-script.sh":b"#!/bin/sh\nprintf package-ok\n",
                    "bundle/outer/nested/SKILL.md":b"---\nname: nested\ndescription: Nested.\n---\n",
                    "bundle/outer/nested/skill-package.json":json.dumps(nested).encode()}
-            payload=Export("plugin","plugin-1","a"*64,archive(files,modes={"bundle/outer/scripts/check.sh":0o755}))
+            payload=Export("plugin","plugin-1","a"*64,archive(files,modes={"bundle/outer/resource-script.sh":0o755}))
             status=LibraryCache(Path(directory)/"cache").publish([payload])
             root=Path(status["catalog_root"]); manifest=json.loads((root.parent/"manifest.json").read_text())
-            self.assertEqual({row["stable_id"] for row in manifest["packages"]},{"shared:outer","shared:nested"})
+            self.assertEqual({row["stable_id"] for row in manifest["packages"]},{"shared:outer"})
             destinations={row["stable_id"]:row["destination"] for row in manifest["packages"]}
-            outer=root/destinations["shared:outer"]; nested=root/destinations["shared:nested"]
-            self.assertEqual((outer/"scripts"/"check.sh").read_bytes(),files["bundle/outer/scripts/check.sh"])
+            outer=root/destinations["shared:outer"]
+            self.assertEqual((outer/"scripts"/"check.sh").read_bytes(),files["bundle/outer/resource-script.sh"])
             self.assertTrue((outer/"scripts"/"check.sh").stat().st_mode & 0o111)
             self.assertEqual((outer/"nested"/"SKILL.md").read_bytes(),files["bundle/outer/nested/SKILL.md"])
-            self.assertEqual((nested/"SKILL.md").read_bytes(),files["bundle/outer/nested/SKILL.md"])
 
     def test_explicit_stable_identity_survives_source_directory_rename(self):
         with tempfile.TemporaryDirectory() as directory:

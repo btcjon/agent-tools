@@ -38,7 +38,6 @@ def _split_skill(data):
     if marker < 0:
         raise PublishError("invalid_frontmatter")
     lines = text[4:marker].splitlines()
-    retained = []
     try:
         parsed = yaml.safe_load("\n".join(lines))
     except yaml.YAMLError as exc:
@@ -46,17 +45,11 @@ def _split_skill(data):
     if not isinstance(parsed, dict):
         raise PublishError("invalid_frontmatter")
     name, description = parsed.get("name"), parsed.get("description")
-    for line in lines:
-        if line.startswith("name:"):
-            continue
-        elif line.startswith("description:"):
-            continue
-        else:
-            retained.append(line)
     if not isinstance(name, str) or not isinstance(description, str) or not name or not description:
         raise PublishError("missing_name_or_description")
     body = text[marker + 5 :].strip("\n")
-    metadata = "\n".join(retained).strip()
+    retained={key:value for key,value in parsed.items() if key not in {"name","description"}}
+    metadata=yaml.safe_dump(retained,sort_keys=False,allow_unicode=True).strip() if retained else "{}"
     page = (
         body
         + "\n\n## Preserved source metadata\n\n"

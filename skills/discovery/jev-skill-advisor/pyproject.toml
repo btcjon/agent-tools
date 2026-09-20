@@ -17,6 +17,7 @@ skill-library = "jev_skill_advisor.library_cli:main"
 skill-library-publish = "jev_skill_advisor.publish_cli:main"
 skill-advisor-shadow = "jev_skill_advisor.shadow_eval:main"
 skill-advisor-production = "jev_skill_advisor.production_cli:main"
+skill-library-sync = "jev_skill_advisor.sync_cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
