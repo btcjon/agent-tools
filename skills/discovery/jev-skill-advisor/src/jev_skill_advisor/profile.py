@@ -60,7 +60,7 @@ class HostProfile:
 
 
 def _policy(source: Path):
-    text = source.read_text(encoding="utf-8", errors="replace")[:8000]
+    text = source.read_text(encoding="utf-8", errors="replace")
     front = ""
     lines = text.splitlines()
     if lines and lines[0].strip() == "---":

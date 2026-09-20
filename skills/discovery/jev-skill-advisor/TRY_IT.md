@@ -3,7 +3,13 @@
 These steps prove transport and logging in shadow mode. They do not enable automatic skill injection.
 
 1. Install from this directory: `uv sync --extra mcp`.
-2. Copy `examples/service-host.example.json` to a host-local configuration path. Point it at a reviewed catalog and canonical warehouse. Replace `warehouse:example` with a real stable ID in both the profile and the sample request below. Keep `mode` as `shadow`, `read_enabled` false, and `read_allowlist` empty.
+2. Build a host-local catalog, then copy `examples/service-host.example.json` to a host-local configuration path. Point it at that catalog and the same canonical warehouse. Replace `warehouse:example` with a real stable ID in both the profile and sample request. Keep `mode` as `shadow`, `read_enabled` false, and `read_allowlist` empty.
+
+   ```bash
+   uv run skill-advisor-catalog --warehouse /path/to/skills/exported --output /host/state/catalog-v1.json
+   ```
+
+   Review every reported exclusion. An unchanged warehouse must produce the same catalog hash on a repeat build.
 3. Export `TYPESAFE_API_KEY` without placing it in the repository.
 4. Initialize and inspect host-local state:
 

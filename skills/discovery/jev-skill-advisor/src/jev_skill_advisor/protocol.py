@@ -44,7 +44,7 @@ def validate_suggest(value):
         "task": _text(value.get("task"), "task", high=8000),
         "context": _text(value.get("context", ""), "context", low=0, high=2000),
         "explicit_skills": _list(value.get("explicit_skills"), "explicit_skills", 5),
-        "available_ids": None if "available_ids" not in value else _list(value.get("available_ids"), "available_ids", 256),
+        "available_ids": None if "available_ids" not in value else _list(value.get("available_ids"), "available_ids", 1024),
     }
 
 

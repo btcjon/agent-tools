@@ -113,6 +113,11 @@ class ServiceTests(unittest.TestCase):
         self.catalog.write_text(json.dumps(catalog))
         with self.assertRaises(ProfileError): load_profile(self.config)
 
+    def test_available_id_inventory_limit(self):
+        base={"protocol_version":1,"request_id":"r","session_id":"s","task":"x"}
+        self.assertEqual(len(validate_suggest({**base,"available_ids":[f"warehouse:s{i}" for i in range(1024)]})["available_ids"]),1024)
+        with self.assertRaises(ProtocolError): validate_suggest({**base,"available_ids":[f"warehouse:s{i}" for i in range(1025)]})
+
     def test_cli_explicit_parity(self):
         payload = {"protocol_version": 1, "request_id": "cli", "session_id": "s", "task": "x", "explicit_skills": ["alpha"]}
         env = os.environ.copy(); env["PYTHONPATH"] = str(Path(__file__).parents[1] / "src")
