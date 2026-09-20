@@ -422,6 +422,21 @@ def _verify_existing(transport,row,page_id,source_data=None,bundle_data=None,man
     return transport.verify_skill(row,page_id,expected,bundle_data,manifest_data)
 
 
+def _property_fingerprint(properties):
+    properties=properties if isinstance(properties,dict) else {}
+    def text(name,kind):
+        value=properties.get(name,{})
+        items=value.get(kind,[]) if isinstance(value,dict) else []
+        return "".join((item.get("plain_text") or item.get("text",{}).get("content") or "") for item in items if isinstance(item,dict))
+    tags=properties.get("Tags",{}); tags=tags.get("multi_select",[]) if isinstance(tags,dict) else []
+    files=properties.get("Files",{}); files=files.get("files",[]) if isinstance(files,dict) else []
+    normalized={"name":text("Skill name","title"),"description":text("Description","rich_text"),
+        "tags":sorted(item.get("name","") for item in tags if isinstance(item,dict)),
+        "files":sorted((item.get("name",""),item.get("type",""),
+            (item.get("file_upload") or {}).get("id","") if isinstance(item.get("file_upload"),dict) else "") for item in files if isinstance(item,dict))}
+    return _hash(normalized)
+
+
 def execute_sync(inventory,plan,*,ledger_path,run_id=None,transport=None,limit=None,only_ids=None):
     ledger=SyncLedger(ledger_path)
     run_id=run_id or f"sync-{uuid.uuid4().hex}"
@@ -480,6 +495,15 @@ def _execute_sync(inventory,plan,*,ledger,run_id=None,transport=None,limit=None,
                 marker=parse_managed_marker(transport.request(f"v1/pages/{action['page_id']}/markdown").get("markdown","")) if prior else None
                 owned_partial=bool(marker and marker.get("operation_id")==operation_id)
                 if not owned_partial and live.get("version_id")!=action.get("expected_remote_hash"): raise SyncError("remote_changed_before_update")
+                baseline_kind="baseline:properties"; baseline=ledger.operation(run_id,row["stable_id"],baseline_kind)
+                if baseline is None:
+                    if prior: raise SyncError("missing_property_baseline")
+                    page=transport.request(f"v1/pages/{action['page_id']}")
+                    baseline_hash=_property_fingerprint(page.get("properties",{}))
+                    ledger.checkpoint_intent(run_id,row["stable_id"],baseline_kind,baseline_hash)
+                    ledger.record_attempt(run_id,row["stable_id"],baseline_kind)
+                    baseline=ledger.record_result(run_id,row["stable_id"],baseline_kind,result_id=baseline_hash)
+                elif baseline["status"]!="complete": raise SyncError("ambiguous_property_baseline")
             else:
                 existing_page=remote_identities.get(row["stable_id"])
                 if existing_page:
@@ -508,6 +532,10 @@ def _execute_sync(inventory,plan,*,ledger,run_id=None,transport=None,limit=None,
                 properties={"Skill name":{"type":"title","title":[{"type":"text","text":{"content":name}}]},
                     "Description":{"type":"rich_text","rich_text":[{"type":"text","text":{"content":description}}]},
                     "Tags":{"type":"multi_select","multi_select":[{"name":row["plugin_tag"]}]},"Files":{"type":"files","files":uploads}}
+                if kind=="update":
+                    observed=transport.request(f"v1/pages/{action['page_id']}")
+                    observed_hash=_property_fingerprint(observed.get("properties",{})); intended_hash=_property_fingerprint(properties)
+                    if observed_hash not in {baseline["desired_hash"],intended_hash}: raise SyncError("partial_update_properties_changed")
                 if kind=="create":
                     try: page_id=transport.create_page({"parent":{"type":"data_source_id","data_source_id":plan["data_source_id"]},"properties":properties,"markdown":markdown}).get("id")
                     except SyncError:

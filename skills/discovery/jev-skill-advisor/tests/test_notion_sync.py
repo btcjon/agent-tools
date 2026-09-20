@@ -2,7 +2,7 @@ import io,json,tarfile
 from pathlib import Path
 import pytest
 from jev_skill_advisor.notion_import import Export
-from jev_skill_advisor.notion_sync import NtnSyncTransport,SyncError,_bundle_bytes,_generated_manifest,_page_material,_pin_frozen_row,discover_remote,execute_sync,freeze_inventory,managed_marker,parse_managed_marker,plan_sync
+from jev_skill_advisor.notion_sync import NtnSyncTransport,SyncError,_bundle_bytes,_generated_manifest,_page_material,_pin_frozen_row,_property_fingerprint,discover_remote,execute_sync,freeze_inventory,managed_marker,parse_managed_marker,plan_sync
 
 
 def skill(root,name,extra=None):
@@ -216,6 +216,7 @@ def test_partial_update_resumes_without_reuploading_or_rechecking_old_version(tm
     destination=__import__("jev_skill_advisor.notion_sync",fromlist=["_hash"])._hash({"database_id":"db","data_source_id":"ds"})
     ledger.create_run("resume",source_snapshot_id=binding,destination_id=destination)
     ledger.checkpoint_intent("resume",row["stable_id"],"update",row["desired_hash"],page_id="page-a"); ledger.record_attempt("resume",row["stable_id"],"update")
+    baseline_hash=_property_fingerprint({}); ledger.checkpoint_intent("resume",row["stable_id"],"baseline:properties",baseline_hash); ledger.record_attempt("resume",row["stable_id"],"baseline:properties"); ledger.record_result("resume",row["stable_id"],"baseline:properties",result_id=baseline_hash)
     for kind in ("upload:@bundle","upload:skill-package.json"):
         ledger.checkpoint_intent("resume",row["stable_id"],kind,"saved"); ledger.record_attempt("resume",row["stable_id"],kind); ledger.record_result("resume",row["stable_id"],kind,upload_id=f"id-{kind}")
     transport=Partial(); result=execute_sync(inventory,plan,ledger_path=ledger_path,run_id="resume",transport=transport)
@@ -254,6 +255,31 @@ def test_preflight_failure_marks_run_failed(tmp_path):
         execute_sync(inventory,plan,ledger_path=ledger_path,run_id="preflight",transport=FakeTransport())
     from jev_skill_advisor.sync_ledger import SyncLedger
     assert SyncLedger(ledger_path).run("preflight")["status"]=="failed"
+
+
+def test_partial_update_rejects_intervening_property_or_attachment_edit(tmp_path):
+    skill(tmp_path,"alpha"); inventory=freeze_inventory(tmp_path); row=inventory["skills"][0]
+    plan=plan_sync(inventory,[{"stable_id":row["stable_id"],"page_id":"page-a","last_synced_hash":"old","remote_hash":"old"}],database_id="db",data_source_id="ds")
+    operation_id="resume:warehouse:alpha"
+    class Edited(FakeTransport):
+        def request(self,path,method="GET",body=None):
+            if path.endswith("/query"): return {"results":[{"id":"page-a"}],"has_more":False}
+            if path.endswith("/markdown"): return {"markdown":_page_material(row,operation_id,"pending")[2]}
+            if path=="v1/pages/page-a": return {"properties":{"Description":{"rich_text":[{"plain_text":"human edit"}]},"Files":{"files":[{"name":"human.txt","type":"file"}]}}}
+            return {"version_id":"changed"}
+    from jev_skill_advisor.sync_ledger import SyncLedger
+    from jev_skill_advisor.notion_sync import _hash
+    ledger_path=tmp_path/"ledger.sqlite3"; ledger=SyncLedger(ledger_path)
+    binding=_hash({"inventory_hash":inventory["inventory_hash"],"plan_hash":plan["plan_hash"],"database_id":"db","data_source_id":"ds"})
+    destination=_hash({"database_id":"db","data_source_id":"ds"})
+    ledger.create_run("resume",source_snapshot_id=binding,destination_id=destination)
+    ledger.checkpoint_intent("resume",row["stable_id"],"update",row["desired_hash"],page_id="page-a"); ledger.record_attempt("resume",row["stable_id"],"update")
+    ledger.checkpoint_intent("resume",row["stable_id"],"baseline:properties","baseline")
+    ledger.record_attempt("resume",row["stable_id"],"baseline:properties"); ledger.record_result("resume",row["stable_id"],"baseline:properties",result_id="baseline")
+    transport=Edited()
+    with pytest.raises(SyncError,match="partial_update_properties_changed"):
+        execute_sync(inventory,plan,ledger_path=ledger_path,run_id="resume",transport=transport)
+    assert not any(call[0] in {"markdown","properties"} for call in transport.calls)
 
 
 def test_custom_entrypoint_is_explicitly_excluded(tmp_path):
