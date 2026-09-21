@@ -12,6 +12,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
 import time
 
 from .client import validate_response
@@ -139,6 +140,68 @@ def envelope(request, context, entries):
                                     "criteria": CRITERIA} for i in range(len(entries))}}
 
 
+SECTION_PRIORITIES = (
+    (0, re.compile(r"\b(use when|when to use|applicability|scope|triggers?)\b", re.I)),
+    (1, re.compile(r"\b(do not use|not for|exclusions?|boundaries|limitations?)\b", re.I)),
+    (2, re.compile(r"\b(workflow|procedure|how to|steps|usage|operations?)\b", re.I)),
+)
+
+
+def _clip_utf8(value, limit):
+    raw=value.encode("utf-8")
+    if len(raw)<=limit: return value,False
+    return raw[:limit].decode("utf-8",errors="ignore"),True
+
+
+def scope_excerpt(body, *, query="", max_bytes=1200):
+    lines=body.splitlines(); blocks=[]; headings=[]
+    for number,line in enumerate(lines,1):
+        match=re.match(r"^(#{1,6})\s+(.+?)\s*$",line)
+        if match: headings.append((number,len(match.group(1)),match.group(2)))
+    for index,(start,level,title) in enumerate(headings):
+        end=len(lines)
+        for next_start,next_level,_ in headings[index+1:]:
+            if next_level<=level: end=next_start-1; break
+        priority=next((rank for rank,pattern in SECTION_PRIORITIES if pattern.search(title)),None)
+        if priority is not None: blocks.append((priority,start,end,title,"\n".join(lines[start-1:end])))
+    blocks.sort(key=lambda item:(item[0],item[1]))
+    selected=[]; seen_priorities=set()
+    for block in blocks:
+        if block[0] not in seen_priorities:
+            selected.append(block); seen_priorities.add(block[0])
+    for block in blocks:
+        if block not in selected: selected.append(block)
+        if len(selected)>=3: break
+    if not selected:
+        start=1
+        if lines and lines[0].strip()=="---":
+            closing=next((i for i,line in enumerate(lines[1:],1) if line.strip()=="---"),None)
+            if closing is not None: start=closing+2
+        excerpt,truncated=_clip_utf8("\n".join(lines[start-1:]),max_bytes)
+        end=start+max(0,excerpt.count("\n"))
+        return {"text":excerpt,"sections":[{"heading":None,"start_line":start,"end_line":end,"truncated":truncated}],"truncated":truncated,"fallback":True}
+    allowance=max_bytes//len(selected); parts=[]; metadata=[]; any_truncated=False
+    query_tokens={token for token in re.findall(r"[a-z0-9]+",query.lower()) if len(token)>2}
+    for priority,start,end,title,text in selected:
+        selected_lines=None
+        if priority==2 and len(text.encode())>allowance and query_tokens:
+            block_lines=text.splitlines(); scored=[]
+            for offset,line in enumerate(block_lines[1:],1):
+                overlap=len(query_tokens & set(re.findall(r"[a-z0-9]+",line.lower())))
+                if overlap: scored.append((-overlap,offset,line))
+            chosen=sorted(scored)[:3]
+            if chosen:
+                focused=[block_lines[0],*(line for _,_,line in chosen)]
+                text="\n".join(focused); selected_lines=[start,*[start+offset for _,offset,_ in chosen]]
+        clipped,truncated=_clip_utf8(text,allowance)
+        actual_end=min(end,start+clipped.count("\n")); parts.append(clipped)
+        metadata.append({"heading":title,"start_line":start,"end_line":actual_end,"selected_lines":selected_lines,"truncated":truncated})
+        any_truncated=any_truncated or truncated
+    combined="\n\n".join(parts)
+    combined,outer_truncated=_clip_utf8(combined,max_bytes)
+    return {"text":combined,"sections":metadata,"truncated":any_truncated or outer_truncated,"fallback":False}
+
+
 def detail_envelope(request, context, entries):
     labels = [chr(ord("A") + i) for i in range(len(entries))]
     candidates = []
@@ -147,12 +210,16 @@ def detail_envelope(request, context, entries):
         if hashlib.sha256(raw).hexdigest() != entry.source_hash:
             raise ValueError("stale_source")
         body = raw.decode("utf-8", errors="replace")
+        excerpt=scope_excerpt(body,query=request+"\n"+context)
         candidates.append({
             "option": labels[index],
             "id": entry.id,
             "description": entry.description,
-            "scope_excerpt": body[:1200],
-            "scope_excerpt_truncated": len(body) > 1200,
+            "source_hash": entry.source_hash,
+            "scope_excerpt": excerpt["text"],
+            "scope_excerpt_sections": excerpt["sections"],
+            "scope_excerpt_truncated": excerpt["truncated"],
+            "scope_excerpt_fallback": excerpt["fallback"],
         })
     criteria = {
         labels[index]: f"Select {labels[index]} only if candidates[{index}] is the best documented procedure."
