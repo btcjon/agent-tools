@@ -97,7 +97,10 @@ def handle_event(event, *, profile=None, release_root=DEFAULT_RELEASE_ROOT, stat
             release_id,manifest,resolved=ReleaseStore(release_root).resolve_profile(
                 host=socket.gethostname(),harness="codex",session_id=session)
             profile=Path(manifest["files"]["profile:codex"]["path"])
-            service_source={"release_root":release_root,"host":socket.gethostname()}
+            # Resolution above already validates and pins the immutable release.
+            # Pass that exact profile to the child instead of repeating full
+            # release and snapshot validation in a second process.
+            service_source=profile
         else:
             profile=Path(profile).resolve(); service_source=profile
         profile_raw=json.loads(profile.read_text(encoding="utf-8")); profile_hash=hashlib.sha256(profile.read_bytes()).hexdigest()
