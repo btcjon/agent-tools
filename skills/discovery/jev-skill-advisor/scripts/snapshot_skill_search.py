@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 
-ROOT = Path.home() / ".agents" / "exported-skills"
+RELEASE_ROOT = Path.home() / ".local" / "state" / "jev-skill-advisor" / "releases"
 STOP = frozenset("a an and for from how i in is of on the to use when with".split())
 ALIASES = {
     "xlsx": {"spreadsheet", "excel", "workbook"},
@@ -42,21 +42,37 @@ def description(text: str) -> str:
     return heading.group(1).strip() if heading else ""
 
 
+def active_entries() -> tuple[Path, list[dict]]:
+    """Load only the catalog cryptographically bound to the active release."""
+    pointer = json.loads((RELEASE_ROOT / "current-release.json").read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (RELEASE_ROOT / "releases" / pointer["release_id"] / "manifest.json").read_text(encoding="utf-8")
+    )
+    catalog = json.loads(Path(manifest["files"]["catalog"]["path"]).read_text(encoding="utf-8"))
+    root = Path(catalog["warehouse_root"]).resolve()
+    if root != Path(manifest["snapshot_root"]).resolve() or not root.is_dir():
+        raise ValueError("active release catalog is not snapshot-bound")
+    return root, catalog["entries"]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="skill-search")
     parser.add_argument("query", nargs="+")
     parser.add_argument("--limit", type=int, default=5)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    if not ROOT.is_dir():
-        raise SystemExit(f"missing active skill distribution: {ROOT}")
+    try:
+        root, entries = active_entries()
+    except (OSError, KeyError, ValueError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"invalid active skill distribution: {exc}") from exc
     query = " ".join(args.query).strip()
     wanted = tokens(query)
     hits = []
-    for skill in ROOT.glob("*/SKILL.md"):
+    for entry in entries:
+        skill = root / entry["relative_path"] / entry.get("entrypoint", "SKILL.md")
         body = skill.read_text(encoding="utf-8", errors="replace")[:4000]
-        name = skill.parent.name
-        desc = description(body)
+        name = entry["name"]
+        desc = entry.get("description") or description(body)
         name_tokens, desc_tokens, body_tokens = tokens(name.replace("-", " ")), tokens(desc), tokens(body[:1200])
         matched = {item for item in wanted if item in name_tokens or item in desc_tokens or item in body_tokens}
         coverage = len(matched) / max(1, len(wanted))
