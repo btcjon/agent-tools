@@ -102,6 +102,18 @@ def test_shadow_report_is_bounded_and_omits_raw_payloads(tmp_path):
     assert len(details) == 1 and "raw_provider_payload" in details[0].read_text()
 
 
+def test_release_bound_eval_does_not_depend_on_current_pointer(tmp_path, monkeypatch):
+    cache,status,profile,cases,_=prepared(tmp_path); FakeService.calls=0; FakeService.seen={}
+    manifest={"snapshot_id":status["snapshot_id"],"snapshot_root":status["catalog_root"],"skill_count":3,
+              "profiles":["codex","generic"],"files":{"profile:codex":{"path":str(profile)}}}
+    from jev_skill_advisor.release import ReleaseStore
+    monkeypatch.setattr(ReleaseStore,"validate",lambda self,release_id:manifest)
+    report=run_shadow(release_root=tmp_path/"releases",release_id="a"*64,harness="codex",
+                      cases_path=cases,report_path=tmp_path/"eval"/"report.json",service_factory=FakeService)
+    assert report["release_id"]=="a"*64 and report["skill_bodies_delivered"]==0
+    assert (tmp_path/"eval"/"runtime"/"advisor.sqlite3").is_file()
+
+
 def test_invalid_snapshot_blocks_service_calls(tmp_path):
     cache, status, profile, cases, _ = prepared(tmp_path); FakeService.calls = 0
     root = cache / "snapshots" / status["snapshot_id"] / "skills" / "plan" / "SKILL.md"

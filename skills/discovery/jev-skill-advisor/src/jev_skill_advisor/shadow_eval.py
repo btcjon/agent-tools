@@ -63,15 +63,15 @@ def write_profile(*, cache_root, state_dir, profile_path, harness="pilot", crede
     return {"snapshot_id": status["snapshot_id"], "catalog_hash": catalog["catalog_hash"], "profile_path": str(Path(profile_path).resolve())}
 
 
-def _cases(path):
+def _cases(path, *, max_cases=8, max_attempts=20):
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(raw, dict) or set(raw) not in ({"schema_version", "snapshot_id", "cases"}, {"schema_version", "snapshot_id", "cases", "provider_attempt_cap"}) or raw["schema_version"] != 1:
         raise ShadowEvalError("invalid_cases_file")
     rows = raw["cases"]
-    if not isinstance(rows, list) or not 4 <= len(rows) <= 8:
-        raise ShadowEvalError("shadow_requires_4_to_8_cases")
+    if not isinstance(rows, list) or not 4 <= len(rows) <= max_cases:
+        raise ShadowEvalError("invalid_shadow_case_count")
     cap = raw.get("provider_attempt_cap", 20)
-    if not isinstance(cap, int) or isinstance(cap, bool) or not 1 <= cap <= 20:
+    if not isinstance(cap, int) or isinstance(cap, bool) or not 1 <= cap <= max_attempts:
         raise ShadowEvalError("invalid_provider_attempt_cap")
     ids = set()
     for row in rows:
@@ -102,15 +102,30 @@ def _mapping(profile):
     return result
 
 
-def run_shadow(*, cache_root, profile_path, cases_path, report_path, service_factory=SkillAdvisorService):
-    status = LibraryCache(cache_root).status()
-    if status.get("status") != "ready": raise ShadowEvalError("snapshot_not_ready")
-    cases = _cases(cases_path)
+def run_shadow(*, cache_root=None, profile_path=None, cases_path, report_path,
+               release_root=None, release_id=None, harness=None,
+               service_factory=SkillAdvisorService):
+    release_manifest = None
+    if release_root is not None or release_id is not None:
+        if cache_root is not None or profile_path is not None or not release_root or not release_id or not harness:
+            raise ShadowEvalError("choose_cache_or_release")
+        from .release import ReleaseStore
+        release_manifest = ReleaseStore(release_root).validate(release_id)
+        selected = harness if harness in release_manifest["profiles"] else "generic"
+        profile_path = Path(release_manifest["files"][f"profile:{selected}"]["path"])
+        status = {"status": "ready", "snapshot_id": release_manifest["snapshot_id"],
+                  "catalog_root": release_manifest["snapshot_root"], "skill_count": release_manifest["skill_count"]}
+        cases = _cases(cases_path, max_cases=12, max_attempts=160)
+        max_attempts = 160
+    else:
+        status = LibraryCache(cache_root).status()
+        if status.get("status") != "ready": raise ShadowEvalError("snapshot_not_ready")
+        cases = _cases(cases_path); max_attempts = 20
     if cases["snapshot_id"] != status["snapshot_id"]: raise ShadowEvalError("snapshot_provenance_mismatch")
     profile = load_profile(Path(profile_path))
     if profile.mode != "shadow" or profile.read_enabled or profile.read_allowlist:
         raise ShadowEvalError("profile_not_strict_shadow")
-    if profile.provider_attempt_limit > 20 or profile.prompt_limit > 20:
+    if profile.provider_attempt_limit > max_attempts or profile.prompt_limit > 20:
         raise ShadowEvalError("shadow_budget_too_large")
     if profile.warehouse_root != Path(status["catalog_root"]).resolve():
         raise ShadowEvalError("profile_snapshot_mismatch")
@@ -126,11 +141,14 @@ def run_shadow(*, cache_root, profile_path, cases_path, report_path, service_fac
     # Live shadow mode is deliberately a no-op. Evaluation uses a private
     # advisory clone bound to the same read-disabled profile and isolated
     # runtime so it can score selections without authorizing body delivery.
-    evaluation_profile = replace(profile, mode="advisory", read_enabled=False, read_allowlist=frozenset())
+    eval_state = Path(report_path).resolve().parent / "runtime" if release_manifest else profile.state_dir
+    evaluation_profile = replace(profile, mode="advisory", read_enabled=False,
+                                 read_allowlist=frozenset(), state_dir=eval_state)
+    ServiceRuntime(evaluation_profile, initialize=True)
     if service_factory is SkillAdvisorService:
         consumed = ServiceRuntime(profile).counts().get("provider_attempts", 0)
         remaining = max(0, profile.provider_attempt_limit - consumed)
-        allowance = min(cases.get("provider_attempt_cap", 20), remaining)
+        allowance = min(cases.get("provider_attempt_cap", max_attempts), remaining)
         if allowance < 1:
             raise ShadowEvalError("provider_attempt_budget_exhausted")
         evaluation_profile = replace(evaluation_profile, provider_attempt_limit=consumed + allowance)
@@ -154,7 +172,7 @@ def run_shadow(*, cache_root, profile_path, cases_path, report_path, service_fac
                 raise ShadowEvalError("invalid_detail_decision_audit")
         for key in totals: totals[key] += int(telemetry.get(key, 0))
         if isinstance(telemetry.get("elapsed_ms"), (int, float)): latencies.append(float(telemetry["elapsed_ms"]))
-        if totals["provider_attempts"] > cases.get("provider_attempt_cap", 20): raise ShadowEvalError("provider_attempt_budget_exceeded")
+        if totals["provider_attempts"] > cases.get("provider_attempt_cap", max_attempts): raise ShadowEvalError("provider_attempt_budget_exceeded")
         reason = str(response.get("reason"))
         provider_failure = response.get("status") == "incomplete" or reason in {"protected_input", "provider_unavailable", "prompt_budget", "absolute_deadline", "worker_failure"} or reason.endswith("provider_failure")
         if provider_failure:
@@ -188,13 +206,14 @@ def run_shadow(*, cache_root, profile_path, cases_path, report_path, service_fac
     if any(row["provider_attempts"] for row in explicit): raise ShadowEvalError("explicit_selection_used_provider")
     replays = [row for row in results if next(case for case in cases["cases"] if case["id"] == row["id"]).get("replay_of")]
     report = {"schema_version": 1, "mode": "shadow", "run_status": "failed" if stopped_reason else "complete", "stopped_reason": stopped_reason,
+              "release_id": release_id,
               "snapshot_id": status["snapshot_id"], "catalog_hash": profile.catalog_hash,
               "policy_hash": profile.policy_hash, "cases_hash": case_hash, "notion_page_mapping": mapping,
               "skill_bodies_delivered": 0, "cases": results, "summary": {**counts, **totals, "case_count": len(results),
                   "latency_ms_total": round(sum(latencies), 3), "explicit_zero_call": bool(explicit) and all(not row["provider_attempts"] for row in explicit),
                   "replay_cache_hit": bool(replays) and all(row["cache_hits"] > 0 for row in replays)},
               "interpretation": "Selection evidence only; no measured main-model token-savings claim."}
-    detail_path = Path(profile.state_dir) / "shadow-details" / f"{case_hash}.json"
+    detail_path = Path(evaluation_profile.state_dir) / "shadow-details" / f"{case_hash}.json"
     _atomic_json(detail_path, {"schema_version": 1, "responses": detail})
     _atomic_json(report_path, report)
     return report
@@ -207,10 +226,11 @@ def main(argv=None):
     for command in (prepare,):
         command.add_argument("--cache-root", type=Path, required=True); command.add_argument("--state-dir", type=Path, required=True); command.add_argument("--profile", type=Path, required=True); command.add_argument("--harness", default="pilot"); command.add_argument("--credential-file", type=Path)
     run = commands.add_parser("run")
-    run.add_argument("--cache-root", type=Path, required=True); run.add_argument("--profile", type=Path, required=True)
+    run.add_argument("--cache-root", type=Path); run.add_argument("--profile", type=Path)
+    run.add_argument("--release-root", type=Path); run.add_argument("--release-id"); run.add_argument("--harness")
     run.add_argument("--cases", type=Path, required=True); run.add_argument("--report", type=Path, required=True)
     args = parser.parse_args(argv)
-    result = write_profile(cache_root=args.cache_root, state_dir=args.state_dir, profile_path=args.profile, harness=args.harness, credential_file=args.credential_file) if args.command == "prepare" else run_shadow(cache_root=args.cache_root, profile_path=args.profile, cases_path=args.cases, report_path=args.report)
+    result = write_profile(cache_root=args.cache_root, state_dir=args.state_dir, profile_path=args.profile, harness=args.harness, credential_file=args.credential_file) if args.command == "prepare" else run_shadow(cache_root=args.cache_root, profile_path=args.profile, release_root=args.release_root, release_id=args.release_id, harness=args.harness, cases_path=args.cases, report_path=args.report)
     print(json.dumps(result, sort_keys=True, indent=2)); return 3 if result.get("run_status") == "failed" else 0
 
 
