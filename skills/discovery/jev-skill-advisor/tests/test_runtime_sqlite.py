@@ -1,10 +1,11 @@
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 import hashlib, json, sqlite3, tempfile, unittest
 from pathlib import Path
 
 from jev_skill_advisor.profile import load_profile
-from jev_skill_advisor.runtime import ServiceRuntime
+from jev_skill_advisor.runtime import ServiceRuntime, credential
 
 class SQLiteRuntimeTests(unittest.TestCase):
     def setUp(self):
@@ -57,5 +58,17 @@ class SQLiteRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,"legacy_migration_required"): ServiceRuntime(self.profile)
         migration=ServiceRuntime(self.profile,allow_pending_legacy=True); migration.migrate_legacy()
         self.assertEqual(ServiceRuntime(self.profile).counts(),{"prompts":20,"provider_attempts":160})
+
+    def test_credential_file_works_without_inherited_environment(self):
+        shared = Path(self.tmp.name) / "shared.env"
+        shared.write_text("JEV_API=placeholder-value\n", encoding="utf-8"); shared.chmod(0o600)
+        profile = replace(self.profile, provider_enabled=True, credential_env="TYPESAFE_API_KEY",
+                          credential_file=shared)
+        prior = __import__("os").environ.pop("TYPESAFE_API_KEY", None)
+        try:
+            self.assertEqual(credential(profile), "placeholder-value")
+        finally:
+            if prior is not None:
+                __import__("os").environ["TYPESAFE_API_KEY"] = prior
 
 if __name__=="__main__": unittest.main()

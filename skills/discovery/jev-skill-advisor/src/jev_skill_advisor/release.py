@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import stat
 import tempfile
 import time
 
@@ -244,6 +245,7 @@ class ReleaseStore:
 def build_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
                          evidence: dict[str, Path], revision: str,
                          activation: str,
+                         credential_file: Path | None = None,
                          harnesses=("codex", "hermes", "generic"),
                          _test_unbound: bool = False) -> tuple[str, dict]:
     """Build a deterministic immutable release without activating it."""
@@ -255,6 +257,16 @@ def build_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
     from .runtime import ServiceRuntime
 
     root = Path(root).resolve(); snapshot_root = Path(snapshot_root).resolve()
+    credential_path = Path(credential_file).expanduser().resolve() if credential_file else None
+    if credential_path is not None:
+        try:
+            info = credential_path.lstat()
+        except OSError as exc:
+            raise ReleaseError("credential_file_not_found") from exc
+        mode = stat.S_IMODE(info.st_mode)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or not mode & stat.S_IRUSR or mode & 0o077):
+            raise ReleaseError("credential_file_permissions")
     catalog = build_catalog(snapshot_root)
     stable_ids = sorted(row["stable_id"] for row in catalog["entries"])
     all_ids = sorted({row["stable_id"] for row in [*catalog["entries"], *catalog.get("exclusions", [])]})
@@ -262,6 +274,7 @@ def build_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
         raise ReleaseError("catalog_identity_coverage_mismatch")
     seed = {"snapshot_id": snapshot_id, "catalog_hash": catalog["catalog_hash"], "activation": activation,
             "revision": revision, "harnesses": sorted(harnesses),
+            "credential_file": str(credential_path) if credential_path else None,
             "evidence": {name: _digest(Path(path)) for name, path in sorted(evidence.items())}}
     input_id = hashlib.sha256(_canonical(seed)).hexdigest()
     inputs = root / "release-inputs" / input_id
@@ -296,6 +309,8 @@ def build_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
                  "credential_env": "TYPESAFE_API_KEY", "deadline_s": 5,
                  "max_calls": 32, "max_tokens": 200000, "receipt_ttl_s": 86400,
                  "prompt_limit": 20, "provider_attempt_limit": 160}
+        if credential_path is not None:
+            value["credential_file"] = str(credential_path)
         if path.exists() and json.loads(path.read_text()) != value:
             raise ReleaseError("immutable_release_input_conflict")
         atomic_json(path, value); profiles[harness] = path

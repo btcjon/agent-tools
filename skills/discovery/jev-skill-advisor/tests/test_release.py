@@ -161,3 +161,39 @@ def test_release_activation_profiles_are_strict_and_repeatable(tmp_path):
             assert profile["mode"] == mode and profile["read_enabled"] is read_enabled
             assert profile["read_allowlist"] == (["warehouse:alpha"] if read_enabled else [])
             assert profile["emergency_stop_file"].endswith("EMERGENCY_STOP")
+
+
+def test_release_profiles_bind_selected_host_credential_file(tmp_path):
+    snapshot = tmp_path / "snapshot"; skill = snapshot / "alpha" / "SKILL.md"
+    skill.parent.mkdir(parents=True); skill.write_text("---\nname: alpha\ndescription: alpha procedure\n---\n")
+    evidence = write_json(tmp_path / "parity.json", {"count": 1})
+    credential = tmp_path / "shared.env"; credential.write_text("JEV_API=placeholder\n")
+    credential.chmod(0o600)
+    release_id, manifest = build_release(root=tmp_path / "state", snapshot_id="s", snapshot_root=snapshot,
+        evidence={"parity": evidence}, revision="abc", activation="delivery",
+        credential_file=credential, _test_unbound=True)
+    assert release_id
+    for harness in manifest["profiles"]:
+        profile = json.loads(Path(manifest["files"][f"profile:{harness}"]["path"]).read_text())
+        assert profile["credential_file"] == str(credential.resolve())
+    repeated, _ = build_release(root=tmp_path / "state", snapshot_id="s", snapshot_root=snapshot,
+        evidence={"parity": evidence}, revision="abc", activation="delivery",
+        credential_file=credential, _test_unbound=True)
+    assert repeated == release_id
+
+    other = tmp_path / "other.env"; other.write_text("JEV_API=placeholder\n"); other.chmod(0o600)
+    changed, _ = build_release(root=tmp_path / "changed", snapshot_id="s", snapshot_root=snapshot,
+        evidence={"parity": evidence}, revision="abc", activation="delivery",
+        credential_file=other, _test_unbound=True)
+    assert changed != release_id
+
+    with pytest.raises(ReleaseError, match="credential_file_not_found"):
+        build_release(root=tmp_path / "missing", snapshot_id="s", snapshot_root=snapshot,
+            evidence={"parity": evidence}, revision="abc", activation="delivery",
+            credential_file=tmp_path / "missing.env", _test_unbound=True)
+
+    credential.chmod(0o644)
+    with pytest.raises(ReleaseError, match="credential_file_permissions"):
+        build_release(root=tmp_path / "open", snapshot_id="s", snapshot_root=snapshot,
+            evidence={"parity": evidence}, revision="abc", activation="delivery",
+            credential_file=credential, _test_unbound=True)
