@@ -27,10 +27,13 @@ function stopTree(child) {
 export function createPrepareContextClient(options = {}) {
   const executable = options.executable || "skill-advisor-service";
   const profile = options.profile;
+  const releaseRoot = options.releaseRoot;
+  const host = options.host;
   const timeoutMs = options.timeoutMs || 7000;
   const maxOutputBytes = options.maxOutputBytes || 1024 * 1024;
   const maxBodyBytes = options.maxBodyBytes || 32768;
-  if (!profile) throw new Error("Jev preparation requires an absolute profile path.");
+  if ((!profile && !releaseRoot) || (profile && releaseRoot)) throw new Error("Jev preparation requires exactly one profile or release root.");
+  if (releaseRoot && !host) throw new Error("Release-based Jev preparation requires a host identity.");
   return async function prepare({ task, harness, session_id, available_ids, explicit_skills }, signal) {
     if (signal?.aborted) return EMPTY("cancelled");
     const payload = { task, harness, session_id, max_body_bytes: maxBodyBytes };
@@ -39,7 +42,8 @@ export function createPrepareContextClient(options = {}) {
     return await new Promise((resolve) => {
       let settled = false; let stdout = Buffer.alloc(0);
       let child;
-      try { child = spawn(executable, ["--config", profile, "prepare-context"], { stdio: ["pipe", "pipe", "ignore"], shell: false, detached: process.platform !== "win32" }); }
+      const args = profile ? ["--config", profile, "prepare-context"] : ["--release-root", releaseRoot, "--host", host, "prepare-context"];
+      try { child = spawn(executable, args, { stdio: ["pipe", "pipe", "ignore"], shell: false, detached: process.platform !== "win32" }); }
       catch { resolve(EMPTY("spawn_failure")); return; }
       const finish = (value) => { if (settled) return; settled = true; clearTimeout(timer); signal?.removeEventListener?.("abort", abort); resolve(value); };
       const abort = () => { stopTree(child); finish(EMPTY("cancelled")); };

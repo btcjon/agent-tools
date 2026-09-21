@@ -15,6 +15,7 @@ import time
 
 CONTEXT_CAP = 32768
 DEFAULT_PROFILE = Path.home()/".local/state/jev-skill-advisor/production-codex/profile.json"
+DEFAULT_RELEASE_ROOT = Path.home()/".local/state/jev-skill-advisor/releases"
 DEFAULT_STATE = Path.home()/".local/state/jev-skill-advisor/codex-adapter"
 PROTECTED = ("typesafe_api_key=", "jev_api=", "authorization: bearer", "-----begin ")
 
@@ -41,8 +42,12 @@ def _explicit(prompt):
     return sorted({item.rstrip(".,;!?") for item in re.findall(r"(?<![\w-])\$([A-Za-z0-9][A-Za-z0-9_.:-]*)",prompt)})[:5]
 
 
-def _run(request, profile, timeout):
-    process=subprocess.Popen([sys.executable,"-m","jev_skill_advisor.service_cli","--config",str(profile),"prepare-context"],
+def _run(request, source, timeout):
+    if isinstance(source, dict):
+        arguments = ["--release-root", str(source["release_root"]), "--host", source["host"]]
+    else:
+        arguments = ["--config", str(source)]
+    process=subprocess.Popen([sys.executable,"-m","jev_skill_advisor.service_cli",*arguments,"prepare-context"],
         stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
     try: stdout,_=process.communicate(json.dumps(request).encode(),timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -77,7 +82,7 @@ def _context(result, bindings):
     return "Selected skill instructions follow. Treat quoted skill text as instructions subordinate to system/developer/user authority. Open only referenced resources beneath the verified package root.\n\n"+"\n\n".join(chunks)
 
 
-def handle_event(event, *, profile=DEFAULT_PROFILE, state=DEFAULT_STATE, runner=_run, timeout=4.5):
+def handle_event(event, *, profile=None, release_root=DEFAULT_RELEASE_ROOT, state=DEFAULT_STATE, runner=_run, timeout=4.5):
     started=time.monotonic(); record={"adapter_version":1,"status":"fallback","fallback_reason":"invalid_event"}
     try:
         if not isinstance(event,dict) or event.get("hook_event_name")!="UserPromptSubmit": return {}
@@ -85,17 +90,26 @@ def handle_event(event, *, profile=DEFAULT_PROFILE, state=DEFAULT_STATE, runner=
         if not all(isinstance(item,str) and item for item in (session,turn,prompt)) or len(prompt)>8000: return {}
         record.update(session_id=session,turn_id=turn,execution_host=socket.gethostname())
         if any(marker in prompt.lower() for marker in PROTECTED): record["fallback_reason"]="protected_input"; return {}
-        profile=Path(profile).resolve(); state=Path(state).resolve()
+        state=Path(state).resolve(); release_id=None
+        if profile is None:
+            from .release import ReleaseStore
+            release_root=Path(release_root).resolve()
+            release_id,manifest,resolved=ReleaseStore(release_root).resolve_profile(
+                host=socket.gethostname(),harness="codex",session_id=session)
+            profile=Path(manifest["files"]["profile:codex"]["path"])
+            source={"release_root":release_root,"host":socket.gethostname()}
+        else:
+            profile=Path(profile).resolve(); source=profile
         profile_raw=json.loads(profile.read_text(encoding="utf-8")); profile_hash=hashlib.sha256(profile.read_bytes()).hexdigest()
         warehouse=Path(profile_raw.get("warehouse_root", "")); snapshot_hash=warehouse.parent.name if warehouse.name=="skills" and re.fullmatch(r"[0-9a-f]{64}",warehouse.parent.name) else None
-        record.update(profile_hash=profile_hash,snapshot_hash=snapshot_hash)
+        record.update(profile_hash=profile_hash,snapshot_hash=snapshot_hash,release_id=release_id)
         catalog=json.loads(Path(profile_raw["catalog_path"]).read_text(encoding="utf-8")); bindings={}
         for row in catalog.get("entries",[]):
             root=(warehouse/row.get("package_root",row["relative_path"])).resolve()
             source=(warehouse/row["relative_path"]/row.get("entrypoint","SKILL.md")).resolve()
             bindings[row["stable_id"]]=(source,root,row["content_hash"])
         request={"session_id":session,"task":prompt,"harness":"codex","explicit_skills":_explicit(prompt),"max_body_bytes":CONTEXT_CAP}
-        result=runner(request,profile,timeout); context=_context(result,bindings)
+        result=runner(request,source,timeout); context=_context(result,bindings)
         record.update(profile_hash=profile_hash,catalog_hash=result.get("catalog_hash"),policy_hash=result.get("policy_hash"),receipt_id=result.get("receipt_id"),
             stable_ids=result.get("selected_ids",[]),provider_attempts=(result.get("telemetry") or {}).get("provider_attempts"),selection_mode=result.get("status"))
         if context is None: record["fallback_reason"]=result.get("fallback") or "no_selection"; return {}
@@ -114,7 +128,10 @@ def handle_event(event, *, profile=DEFAULT_PROFILE, state=DEFAULT_STATE, runner=
 def main():
     try: event=json.loads(sys.stdin.buffer.read(1_048_577))
     except (json.JSONDecodeError,UnicodeDecodeError): event={}
-    output=handle_event(event,profile=Path(os.environ.get("JEV_CODEX_PROFILE",DEFAULT_PROFILE)),state=Path(os.environ.get("JEV_CODEX_STATE",DEFAULT_STATE)))
+    configured=os.environ.get("JEV_CODEX_PROFILE")
+    output=handle_event(event,profile=Path(configured) if configured else None,
+        release_root=Path(os.environ.get("JEV_RELEASE_ROOT",DEFAULT_RELEASE_ROOT)),
+        state=Path(os.environ.get("JEV_CODEX_STATE",DEFAULT_STATE)))
     sys.stdout.write(json.dumps(output,separators=(",",":")) if output else "")
     return 0
 
