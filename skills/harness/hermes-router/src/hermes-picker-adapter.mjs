@@ -47,6 +47,7 @@ export function configFromEnv(env = process.env) {
     skillAdvisorProfile: env.HERMES_PICKER_SKILL_PROFILE || "",
     skillAdvisorReleaseRoot: env.HERMES_PICKER_SKILL_RELEASE_ROOT || "",
     skillAdvisorHost: env.HERMES_PICKER_SKILL_HOST || os.hostname(),
+    skillCatalogPolicy: env.HERMES_PICKER_SKILL_CATALOG_POLICY === "jev" ? "jev" : "native",
     skillAdvisorExecutable: env.HERMES_PICKER_SKILL_EXECUTABLE || "skill-advisor-service",
     skillAdvisorTimeoutMs: Number(env.HERMES_PICKER_SKILL_TIMEOUT_MS || 7000),
     skillBodyMaxBytes: Number(env.HERMES_PICKER_SKILL_BODY_MAX_BYTES || 32768),
@@ -411,7 +412,7 @@ export class HermesPickerAdapter {
           const created = await this.client.request("/api/sessions", {
             method: "POST",
             body: { title: `Codex ${taskId.slice(0, 8)}`.slice(0, 120), source: "api_server",
-              ...(this.skillPreparer ? { skill_catalog_policy: "jev" } : {}) },
+              ...(this.skillPreparer && this.config.skillCatalogPolicy === "jev" ? { skill_catalog_policy: "jev" } : {}) },
             signal,
           });
           sessionId = created?.session?.id;

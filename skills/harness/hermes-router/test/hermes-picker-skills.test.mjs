@@ -24,7 +24,7 @@ test("selected bodies reach first Hermes request and replay does not prepare twi
       skills: [{ id: "warehouse:alpha", body: "ALPHA_BODY", body_bytes: 10, content_hash: "a".repeat(64) }] };
   };
   const adapter = new HermesPickerAdapter({ client, skillPreparer, copyFile: null,
-    env: { HERMES_PICKER_MAP_PATH: path.join(dir, "map.json"), HERMES_PICKER_ALLOW_CREATE: "true" } });
+    env: { HERMES_PICKER_MAP_PATH: path.join(dir, "map.json"), HERMES_PICKER_ALLOW_CREATE: "true", HERMES_PICKER_SKILL_CATALOG_POLICY: "jev" } });
   const call = () => adapter.handleResponses({ request: { headers: { "thread-id": TASK, "x-request-id": "turn-1" } }, response: response(), payload: payload("ORIGINAL_TEXT") });
   await call(); const replay = await call();
   assert.equal(preparations, 1); assert.equal(messages.length, 1); assert.equal(replay.replayed, true);
@@ -34,6 +34,17 @@ test("selected bodies reach first Hermes request and replay does not prepare twi
   assert.deepEqual(contexts[0].body_hashes, { "warehouse:alpha": "a".repeat(64) });
   assert.equal(contexts[0].message_sha256.length, 64);
   assert.equal(creates[0].skill_catalog_policy, "jev");
+});
+
+test("shadow-capable preparer preserves native Hermes catalog by default", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "hermes-shadow-")); const creates=[];
+  const client={allowedSessions:new Set(), async request(_path,options){creates.push(options.body); return {session:{id:"s-shadow"}};},
+    async continueSession(id){return {sessionId:id,content:"ok"};}};
+  const adapter=new HermesPickerAdapter({client,copyFile:null,
+    env:{HERMES_PICKER_MAP_PATH:path.join(dir,"map.json"),HERMES_PICKER_ALLOW_CREATE:"true"},
+    skillPreparer:async()=>({status:"shadow",reason:"profile_shadow",selected_ids:[],skills:[],body_bytes:0,telemetry:{provider_attempts:0},fallback:"native_discovery"})});
+  await adapter.handleResponses({request:{headers:{"thread-id":TASK,"x-request-id":"shadow-turn"}},response:response(),payload:payload("ORIGINAL")});
+  assert.equal(creates[0].skill_catalog_policy,undefined);
 });
 
 test("fallback preserves exact original message", async () => {
