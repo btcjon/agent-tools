@@ -96,9 +96,8 @@ def _mapping(profile):
     for sid, entry in sorted(profile.entries.items()):
         metadata = frontmatter(Path(entry.source).read_text(encoding="utf-8"))
         page_id = metadata.get("notion_page_id")
-        if not isinstance(page_id, str) or not page_id:
-            raise ShadowEvalError("missing_notion_page_mapping")
-        result[sid] = page_id
+        if isinstance(page_id, str) and page_id:
+            result[sid] = page_id
     return result
 
 
