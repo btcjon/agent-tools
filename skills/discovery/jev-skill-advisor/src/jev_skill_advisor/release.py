@@ -145,7 +145,7 @@ class ReleaseStore:
                     or (raw.get("mode"), raw.get("read_enabled")) != expected
                     or (activation == "delivery" and set(raw.get("read_allowlist", [])) != set(raw.get("eligible_ids", [])))
                     or (activation != "delivery" and raw.get("read_allowlist") != [])
-                    or not raw.get("emergency_stop_file")):
+                    or (manifest["schema_version"] == 2 and not raw.get("emergency_stop_file"))):
                 raise ReleaseError("release_profile_binding_mismatch")
         inventory_item = manifest["files"].get("evidence:inventory")
         parity_item = manifest["files"].get("evidence:parity")
