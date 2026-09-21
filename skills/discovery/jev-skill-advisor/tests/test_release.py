@@ -14,12 +14,16 @@ def write_json(path, value):
 
 
 def make_release(tmp_path, store, name):
+    # Unit-only create fixtures bypass semantic validation by testing malformed
+    # manifests through the full builder elsewhere.
     snapshot = tmp_path / f"snapshot-{name}"; snapshot.mkdir()
     catalog = write_json(tmp_path / f"catalog-{name}.json", {"entries": [{"stable_id": "warehouse:alpha"}]})
     profile = write_json(tmp_path / f"profile-{name}.json", {"name": name})
     evidence = write_json(tmp_path / f"evidence-{name}.json", {"ok": True})
-    return store.create(snapshot_id=name, snapshot_root=snapshot, catalog_path=catalog,
-                        profiles={"codex": profile}, evidence={"parity": evidence}, revision="abc123")
+    release = store.create(snapshot_id=name, snapshot_root=snapshot, catalog_path=catalog,
+                        profiles={"codex": profile}, evidence={"parity": evidence}, revision="abc123",
+                        _test_unbound=True)
+    return release
 
 
 def test_release_rejects_tampering_and_guards_pointer(tmp_path):
@@ -84,7 +88,7 @@ def test_profile_resolution_uses_harness_then_generic_and_rejects_mismatch(tmp_p
     evidence = write_json(tmp_path / "evidence.json", {"ok": True})
     store = ReleaseStore(tmp_path / "releases")
     release = store.create(snapshot_id="s", snapshot_root=snapshot, catalog_path=catalog,
-                           profiles=profiles, evidence={"parity": evidence}, revision="abc")
+                           profiles=profiles, evidence={"parity": evidence}, revision="abc", _test_unbound=True)
     store.activate(release, expected_previous=None)
     assert store.resolve_profile(host="h", harness="codex", session_id="a")[2].harness == "codex"
     assert store.resolve_profile(host="h", harness="unknown", session_id="b")[2].harness == "generic"
@@ -98,9 +102,9 @@ def test_shadow_release_has_full_profile_coverage_and_is_repeatable(tmp_path):
     skill.parent.mkdir(parents=True); skill.write_text("---\nname: alpha\ndescription: alpha procedure\n---\n")
     evidence = write_json(tmp_path / "parity.json", {"count": 1})
     first, manifest = build_shadow_release(root=tmp_path / "state", snapshot_id="s", snapshot_root=snapshot,
-                                            evidence={"parity": evidence}, revision="abc")
+                                            evidence={"parity": evidence}, revision="abc", _test_unbound=True)
     second, repeated = build_shadow_release(root=tmp_path / "state", snapshot_id="s", snapshot_root=snapshot,
-                                             evidence={"parity": evidence}, revision="abc")
+                                             evidence={"parity": evidence}, revision="abc", _test_unbound=True)
     assert first == second
     assert manifest == repeated
     assert manifest["skill_count"] == 1

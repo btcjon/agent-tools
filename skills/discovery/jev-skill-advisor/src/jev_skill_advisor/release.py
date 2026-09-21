@@ -65,7 +65,10 @@ class ReleaseStore:
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
     def create(self, *, snapshot_id: str, snapshot_root: Path, catalog_path: Path,
-               profiles: dict[str, Path], evidence: dict[str, Path], revision: str) -> str:
+               profiles: dict[str, Path], evidence: dict[str, Path], revision: str,
+               _test_unbound: bool = False) -> str:
+        if not _test_unbound and set(evidence) != {"inventory", "parity", "tests"}:
+            raise ReleaseError("release_evidence_missing")
         snapshot_root = Path(snapshot_root).resolve(); catalog_path = Path(catalog_path).resolve()
         files = {"catalog": {"path": str(catalog_path), "sha256": _digest(catalog_path)}}
         files.update({f"profile:{name}": {"path": str(Path(path).resolve()), "sha256": _digest(Path(path))}
@@ -74,7 +77,7 @@ class ReleaseStore:
                       for name, path in sorted(evidence.items())})
         catalog = json.loads(catalog_path.read_text())
         ids = sorted({row["stable_id"] for row in [*catalog.get("entries", []), *catalog.get("exclusions", [])]})
-        manifest = {"schema_version": 1, "snapshot_id": snapshot_id, "snapshot_root": str(snapshot_root),
+        manifest = {"schema_version": 0 if _test_unbound else 1, "snapshot_id": snapshot_id, "snapshot_root": str(snapshot_root),
                     "catalog_hash": files["catalog"]["sha256"], "skill_count": len(ids),
                     "eligible_skill_count": len(catalog.get("entries", [])),
                     "stable_ids_hash": hashlib.sha256(_canonical(ids)).hexdigest(),
@@ -104,8 +107,45 @@ class ReleaseStore:
             candidate = Path(item["path"])
             if not candidate.is_file() or _digest(candidate) != item["sha256"]:
                 raise ReleaseError("release_file_tampered")
-        if not Path(manifest["snapshot_root"]).is_dir():
+        if manifest.get("schema_version") == 0:
+            return manifest
+        if manifest.get("schema_version") != 1:
+            raise ReleaseError("invalid_release_schema")
+        snapshot_root = Path(manifest["snapshot_root"])
+        if not snapshot_root.is_dir():
             raise ReleaseError("release_snapshot_missing")
+        if snapshot_root.name != "skills" or snapshot_root.parent.name != manifest["snapshot_id"]:
+            raise ReleaseError("release_snapshot_binding_mismatch")
+        from .library_cache import LibraryCache, LibraryCacheError
+        try:
+            LibraryCache(snapshot_root.parent.parent.parent)._verify(manifest["snapshot_id"])
+        except LibraryCacheError as exc:
+            raise ReleaseError("release_snapshot_tampered") from exc
+        catalog_path = Path(manifest["files"]["catalog"]["path"])
+        catalog = json.loads(catalog_path.read_text())
+        if Path(catalog.get("warehouse_root", "")).resolve() != snapshot_root.resolve():
+            raise ReleaseError("release_catalog_binding_mismatch")
+        ids = sorted({row["stable_id"] for row in [*catalog.get("entries", []), *catalog.get("exclusions", [])]})
+        if len(ids) != manifest["skill_count"] or hashlib.sha256(_canonical(ids)).hexdigest() != manifest["stable_ids_hash"]:
+            raise ReleaseError("release_catalog_coverage_mismatch")
+        for harness in manifest["profiles"]:
+            raw = json.loads(Path(manifest["files"][f"profile:{harness}"]["path"]).read_text())
+            if (raw.get("harness") != harness or Path(raw.get("warehouse_root", "")).resolve() != snapshot_root.resolve()
+                    or Path(raw.get("catalog_path", "")).resolve() != catalog_path.resolve()
+                    or raw.get("mode") != "shadow" or raw.get("read_enabled") is not False):
+                raise ReleaseError("release_profile_binding_mismatch")
+        inventory_item = manifest["files"].get("evidence:inventory")
+        parity_item = manifest["files"].get("evidence:parity")
+        tests_item = manifest["files"].get("evidence:tests")
+        if not all((inventory_item, parity_item, tests_item)): raise ReleaseError("release_evidence_missing")
+        inventory = json.loads(Path(inventory_item["path"]).read_text())
+        parity = json.loads(Path(parity_item["path"]).read_text())
+        tests = json.loads(Path(tests_item["path"]).read_text())
+        if (parity.get("exact") is not True or parity.get("snapshot_id") != manifest["snapshot_id"]
+                or parity.get("inventory_hash") != inventory.get("inventory_hash")
+                or len(inventory.get("skills", [])) != manifest["skill_count"]
+                or tests.get("status") != "passed" or tests.get("commit") != manifest["implementation_revision"]):
+            raise ReleaseError("release_evidence_binding_mismatch")
         return manifest
 
     def current(self) -> str | None:
@@ -119,10 +159,22 @@ class ReleaseStore:
         self.validate(release_id)
         return release_id
 
+    def _current_identity(self) -> str | None:
+        if not self.pointer.exists():
+            return None
+        try:
+            value = json.loads(self.pointer.read_text())
+            release_id = value["release_id"]
+        except (OSError, KeyError, json.JSONDecodeError) as exc:
+            raise ReleaseError("invalid_current_pointer") from exc
+        if not isinstance(release_id, str):
+            raise ReleaseError("invalid_current_pointer")
+        return release_id
+
     def activate(self, release_id: str, *, expected_previous: str | None) -> None:
         self.validate(release_id)
         with self._locked():
-            actual = self.current()
+            actual = self._current_identity()
             if actual != expected_previous:
                 raise ReleaseError("current_release_changed")
             _atomic(self.pointer, {"schema_version": 1, "release_id": release_id})
@@ -162,11 +214,13 @@ class ReleaseStore:
 
 def build_shadow_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
                          evidence: dict[str, Path], revision: str,
-                         harnesses=("codex", "hermes", "generic")) -> tuple[str, dict]:
+                         harnesses=("codex", "hermes", "generic"),
+                         _test_unbound: bool = False) -> tuple[str, dict]:
     """Build a deterministic, read-disabled release without activating it."""
     from .catalog_cli import build_catalog
     from .production_cli import atomic_json
     from .profile import load_profile
+    from .runtime import ServiceRuntime
 
     root = Path(root).resolve(); snapshot_root = Path(snapshot_root).resolve()
     catalog = build_catalog(snapshot_root)
@@ -200,6 +254,8 @@ def build_shadow_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
         profile = load_profile(path)
         if len(profile.entries) != len(stable_ids):
             raise ReleaseError("profile_catalog_coverage_mismatch")
+        ServiceRuntime(profile, initialize=True)
     release_id = ReleaseStore(root).create(snapshot_id=snapshot_id, snapshot_root=snapshot_root,
-        catalog_path=catalog_path, profiles=profiles, evidence=evidence, revision=revision)
+        catalog_path=catalog_path, profiles=profiles, evidence=evidence, revision=revision,
+        _test_unbound=_test_unbound)
     return release_id, ReleaseStore(root).validate(release_id)
