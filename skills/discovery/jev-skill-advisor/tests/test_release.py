@@ -67,3 +67,26 @@ def test_missing_pinned_release_does_not_repin(tmp_path):
     (store.releases / one / "manifest.json").unlink()
     with pytest.raises(ReleaseError, match="missing_or_invalid_release"):
         store.resolve(host="h", harness="hermes", session_id="A")
+
+
+def test_profile_resolution_uses_harness_then_generic_and_rejects_mismatch(tmp_path):
+    snapshot = tmp_path / "snapshot"; skill = snapshot / "alpha" / "SKILL.md"
+    skill.parent.mkdir(parents=True); skill.write_text("---\nname: alpha\ndescription: alpha procedure\n---\n")
+    catalog = write_json(tmp_path / "catalog.json", {"entries": [{"stable_id": "warehouse:alpha", "name": "alpha",
+        "description": "alpha procedure", "relative_path": "alpha", "content_hash": hashlib.sha256(skill.read_bytes()).hexdigest()}]})
+    profiles = {}
+    for harness in ("codex", "generic"):
+        profiles[harness] = write_json(tmp_path / f"{harness}.json", {"config_version": 1, "profile_id": harness,
+            "harness": harness, "warehouse_root": str(snapshot), "catalog_path": str(catalog),
+            "state_dir": str(tmp_path / f"state-{harness}"), "mode": "shadow", "provider_enabled": True,
+            "read_enabled": False, "eligible_ids": ["warehouse:alpha"], "read_allowlist": []})
+    evidence = write_json(tmp_path / "evidence.json", {"ok": True})
+    store = ReleaseStore(tmp_path / "releases")
+    release = store.create(snapshot_id="s", snapshot_root=snapshot, catalog_path=catalog,
+                           profiles=profiles, evidence={"parity": evidence}, revision="abc")
+    store.activate(release, expected_previous=None)
+    assert store.resolve_profile(host="h", harness="codex", session_id="a")[2].harness == "codex"
+    assert store.resolve_profile(host="h", harness="unknown", session_id="b")[2].harness == "generic"
+    raw = json.loads(profiles["codex"].read_text()); raw["harness"] = "wrong"; profiles["codex"].write_text(json.dumps(raw))
+    with pytest.raises(ReleaseError, match="release_file_tampered"):
+        store.resolve_profile(host="h", harness="codex", session_id="c")

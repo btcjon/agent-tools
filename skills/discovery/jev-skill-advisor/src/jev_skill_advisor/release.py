@@ -144,3 +144,16 @@ class ReleaseStore:
             db.execute("COMMIT")
         # Never silently repin when a retained release is damaged or missing.
         return release_id, self.validate(release_id)
+
+    def resolve_profile(self, *, host: str, harness: str, session_id: str):
+        """Resolve and validate the profile bound to this session's release."""
+        from .profile import load_profile
+        release_id, manifest = self.resolve(host=host, harness=harness, session_id=session_id)
+        selected = harness if harness in manifest["profiles"] else "generic"
+        if selected not in manifest["profiles"]:
+            raise ReleaseError("release_profile_missing")
+        profile_path = Path(manifest["files"][f"profile:{selected}"]["path"])
+        profile = load_profile(profile_path)
+        if profile.harness != selected:
+            raise ReleaseError("release_profile_harness_mismatch")
+        return release_id, manifest, profile

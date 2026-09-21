@@ -5,12 +5,17 @@ from .profile import load_profile, ProfileError
 from .protocol import ProtocolError, error
 from .service import SkillAdvisorService
 from .context import native_fallback, prepare_context, validate_prepare_request
+from .release import ReleaseStore
 import sqlite3
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="skill-advisor-service")
-    parser.add_argument("--config", type=Path, required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--config", type=Path)
+    source.add_argument("--release-root", type=Path)
+    parser.add_argument("--host")
+    parser.add_argument("--harness")
     parser.add_argument("command", choices=("suggest", "read", "report-outcome", "prepare-context"))
     args = parser.parse_args(argv)
     try:
@@ -18,7 +23,16 @@ def main(argv=None):
         if args.command == "prepare-context":
             value = validate_prepare_request(value)
         try:
-            service = SkillAdvisorService(load_profile(args.config))
+            if args.release_root:
+                harness = value.get("harness") if args.command == "prepare-context" else args.harness
+                if not args.host or not harness:
+                    raise ValueError("release_resolution_requires_host_and_harness")
+                session_id = value.get("session_id")
+                _, _, profile = ReleaseStore(args.release_root).resolve_profile(
+                    host=args.host, harness=harness, session_id=session_id)
+                service = SkillAdvisorService(profile)
+            else:
+                service = SkillAdvisorService(load_profile(args.config))
         except (OSError, RuntimeError, sqlite3.Error):
             if args.command == "prepare-context":
                 result = native_fallback("advisor_initialization_failure")
