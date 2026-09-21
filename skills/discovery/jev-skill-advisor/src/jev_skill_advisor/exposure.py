@@ -341,41 +341,40 @@ RANK_CHOICE_LIMIT = 12
 RANK_CHOICE_EXCERPT_BYTES = 1200
 RANK_CHOICE_DESCRIPTION_BYTES = 240
 RANK_SHORTLIST_INSTRUCTIONS = (
-    "Choose the single best next skill to load for this task phase within product and harness scope. "
-    "If none apply or more than one skill is equally appropriate, choose none. "
+    "Choose the single best applicable and permitted skill for the current task. "
+    "A relevant skill remains applicable even when the task is simple. Choose none only when no candidate applies "
+    "or required context is missing; ordinary overlap is not a reason to abstain. "
     "Do not treat truncated card text as a complete executable procedure."
 )
 RANK_CONFIRM_INSTRUCTIONS = (
-    "Confirm whether loading this complete skill would materially help the current task phase "
-    "and match product and harness scope. Truncated text is evidence about the complete skill, "
-    "not a complete executable procedure. Choose none if evidence is insufficient or the skill would not help."
+    "Confirm whether this is an applicable and permitted skill for the current task. A matching skill remains "
+    "applicable even when the task is simple. Truncated text is evidence about the complete skill, not a complete "
+    "executable procedure. Choose none only if the skill does not apply or required context is missing."
 )
 
 
 def rank_choice_contract():
     return {
-        "version": 2,
+        "version": 3,
         "kind": "rank_choice",
         "stages": ["shortlist", "confirm"],
         "evidence_role": SELECTION_EVIDENCE_ROLE,
         "shortlist": {
             "instructions": RANK_SHORTLIST_INSTRUCTIONS,
             "candidate_criterion": (
-                "Select {option} only if loading the complete skill for candidates[{index}] "
-                "would materially help this task phase and match product and harness scope."
+                "Select {option} only if candidates[{index}] is an applicable and permitted skill for the current task."
             ),
             "none_criterion": (
-                "Choose none if no candidate would materially help, evidence is insufficient, "
-                "or more than one skill would be equally appropriate."
+                "Choose none only if no candidate applies or required context is missing."
             ),
         },
         "confirm": {
             "instructions": RANK_CONFIRM_INSTRUCTIONS,
             "skill_criterion": (
-                "Loading the complete skill would materially help this task phase within product and harness scope."
+                "This is an applicable and permitted skill for the current task."
             ),
             "none_criterion": (
-                "Choose none if evidence is insufficient or the complete skill would not materially help."
+                "Choose none only if the skill does not apply or required context is missing."
             ),
         },
     }
@@ -421,14 +420,12 @@ def rank_choice_shortlist_envelope(request, context, entries):
                       "applicability_evidence": evidence["text"]})
     criteria = {
         labels[index]: (
-            f"Select {labels[index]} only if loading the complete skill for candidates[{index}] "
-            "would materially help this task phase and match product and harness scope."
+            f"Select {labels[index]} only if candidates[{index}] is an applicable and permitted skill for the current task."
         )
         for index in range(len(entries))
     }
     criteria["none"] = (
-        "Choose none if no candidate would materially help, evidence is insufficient, "
-        "or more than one skill would be equally appropriate."
+        "Choose none only if no candidate applies or required context is missing."
     )
     questions = {"winner": {"type": "choice", "instructions": RANK_SHORTLIST_INSTRUCTIONS,
                              "criteria": criteria}}
@@ -449,8 +446,8 @@ def rank_choice_confirm_envelope(request, context, entry):
                  "scope_excerpt": excerpt["text"], "scope_excerpt_sections": excerpt["sections"],
                  "scope_excerpt_truncated": excerpt["truncated"], "scope_excerpt_fallback": excerpt["fallback"]}
     questions = {"winner": {"type": "choice", "instructions": RANK_CONFIRM_INSTRUCTIONS, "criteria": {
-        "skill": "Loading the complete skill would materially help this task phase within product and harness scope.",
-        "none": "Choose none if evidence is insufficient or the complete skill would not materially help.",
+        "skill": "This is an applicable and permitted skill for the current task.",
+        "none": "Choose none only if the skill does not apply or required context is missing.",
     }}}
     return {"model": MODEL, "_cache_identity": {"selection_contract": rank_choice_contract(), "stage": "confirm",
             "capabilities": [{"id": entry.id, "source_hash": entry.source_hash, "policy_hash": entry.policy_hash}]},
@@ -465,7 +462,7 @@ def rank_choice_scan(registry, request, context, evaluator, *, deadline_s=5.0, m
     started = time.monotonic()
     receipt = {"status": "incomplete", "reason": None, "selected": [], "eligible": [], "attempts": 0,
                "provider_attempts": 0, "cache_hits": 0, "input_tokens": 0, "unknown_usage": 0,
-               "stages": [], "choices": [], "selection_contract_version": 2}
+               "stages": [], "choices": [], "selection_contract_version": 3}
     def finish(reason, status="incomplete"):
         receipt.update(reason=reason, status=status, elapsed_ms=round((time.monotonic()-started)*1000, 3))
         if status != "complete":
@@ -525,7 +522,7 @@ def rank_choice_scan(registry, request, context, evaluator, *, deadline_s=5.0, m
             "probabilities": winner.get("probabilities"),
             "option_ids": option_ids,
             "source_hashes": [row["source_hash"] for row in payload["_cache_identity"]["capabilities"]],
-            "cache_hit": cache_hit, "contract_version": 2, "input_tokens": usage if isinstance(usage, int) else None,
+            "cache_hit": cache_hit, "contract_version": 3, "input_tokens": usage if isinstance(usage, int) else None,
             "elapsed_ms": round((time.monotonic() - stage_started) * 1000, 3),
             "payload_hash": payload_hash, "contract_hash": contract_hash,
         })

@@ -158,7 +158,7 @@ class SkillAdvisorService:
                      "cache_hits": receipt.get("cache_hits", 0), "input_tokens": receipt.get("input_tokens", 0),
                      "unknown_usage": receipt.get("unknown_usage", 0),
                      "elapsed_ms": round((time.monotonic() - started) * 1000, 3),
-                     "selection_contract_version": receipt.get("selection_contract_version", 2),
+                     "selection_contract_version": receipt.get("selection_contract_version", 3),
                      "choices": receipt.get("choices", []),
                      "stage_names": [row.get("name") for row in stages],
                      "confidences": [row.get("confidence") for row in stages],
