@@ -42,7 +42,7 @@ class ServiceTests(unittest.TestCase):
         self.config = root / "config.json"
         self.config.write_text(json.dumps({"config_version": 1, "profile_id": "test", "harness": "test",
             "warehouse_root": str(self.warehouse), "catalog_path": str(self.catalog), "state_dir": str(self.state),
-            "mode": "shadow", "provider_enabled": True, "read_enabled": True,
+            "mode": "advisory", "provider_enabled": True, "read_enabled": True,
             "eligible_ids": ["warehouse:alpha", "warehouse:beta"], "read_allowlist": ["warehouse:alpha"],
             "credential_env": "TEST_JEV_KEY"}), encoding="utf-8")
         self.profile = load_profile(self.config); ServiceRuntime(self.profile, initialize=True); self.runtime = FakeRuntime(self.profile); self.service = SkillAdvisorService(self.profile, self.runtime)
@@ -72,6 +72,24 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "explicit_selection"); self.assertEqual(self.runtime.calls, [])
         unavailable = self.suggest(request_id="r2", explicit_skills=["beta"], available_ids=["warehouse:alpha"])
         self.assertEqual(unavailable["status"], "unavailable")
+
+    def test_shadow_is_zero_call_and_never_authorizes_reads(self):
+        raw = json.loads(self.config.read_text())
+        raw["mode"] = "shadow"
+        self.config.write_text(json.dumps(raw))
+        profile = load_profile(self.config)
+        runtime = FakeRuntime(profile)
+        service = SkillAdvisorService(profile, runtime)
+        result = service.suggest({"protocol_version": 1, "request_id": "shadow", "session_id": "s",
+                                  "task": "use alpha", "explicit_skills": ["alpha"]})
+        self.assertEqual(result["status"], "shadow")
+        self.assertEqual(result["selected"], [])
+        self.assertEqual(runtime.calls, [])
+        read = service.read({"protocol_version": 1, "session_id": "s", "receipt_id": result["receipt_id"],
+                             "skill_id": "warehouse:alpha",
+                             "expected_content_hash": profile.entries["warehouse:alpha"].source_hash})
+        self.assertEqual(read["status"], "denied")
+        self.assertEqual(read["reason"], "profile_shadow")
 
     def test_denied_read_and_foreign_receipt(self):
         result = self.suggest()

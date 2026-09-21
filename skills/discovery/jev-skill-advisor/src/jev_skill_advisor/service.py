@@ -76,9 +76,14 @@ class SkillAdvisorService:
         data = validate_suggest(value)
         started = time.monotonic()
         evidence = "session_verified" if data["available_ids"] is not None else "profile"
-        registry = self.profile.registry(data["available_ids"], implicit_only=not bool(data["explicit_skills"]))
         if self.profile.mode == "off":
             return self._response(data, "off", "profile_off", evidence=evidence)
+        # Shadow mode may evaluate through the separate bounded shadow runner, but
+        # the live service must never select or authorize skill bodies. Keeping
+        # this guard ahead of registry construction also prevents source reads.
+        if self.profile.mode == "shadow":
+            return self._response(data, "shadow", "profile_shadow", evidence=evidence)
+        registry = self.profile.registry(data["available_ids"], implicit_only=not bool(data["explicit_skills"]))
         if data["explicit_skills"]:
             resolved = []
             for requested in data["explicit_skills"]:
@@ -142,6 +147,12 @@ class SkillAdvisorService:
 
     def read(self, value):
         data = validate_read(value)
+        # This is intentionally before receipt lookup so shadow cannot touch a
+        # receipt or a skill body, including one created before a mode change.
+        if self.profile.mode == "shadow":
+            return {"protocol_version": 1, "status": "denied", "reason": "profile_shadow",
+                    "receipt_id": data["receipt_id"], "skill_id": data["skill_id"],
+                    "advisory_only": True}
         try:
             receipt = self._receipt(data["session_id"], data["receipt_id"])
         except ValueError as exc:
