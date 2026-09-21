@@ -203,3 +203,5 @@ def test_detail_decision_audit_reuses_inclusive_thresholds():
     assert detail_selection_audit(0.65, 0.79, decision="none")["passed"] is True
     assert detail_selection_audit(0.64, 0.79, decision="none")["passed"] is False
     assert detail_selection_audit(0.9, 0.8, decision="none")["passed"] is False
+    assert detail_selection_audit(0.95, 0.65)["passed"] is False
+    assert detail_selection_audit(0.95, 0.65)["fit_floor"] == 0.8
