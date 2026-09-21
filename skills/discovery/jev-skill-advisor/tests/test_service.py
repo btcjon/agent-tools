@@ -144,5 +144,27 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr.decode()); result = json.loads(proc.stdout)
         self.assertEqual(result["status"], "explicit_selection"); self.assertEqual(result["selected"][0]["id"], "warehouse:alpha")
 
+    def test_spawn_worker_receives_retrieved_ids(self):
+        from unittest.mock import patch
+        class Process:
+            def __init__(self,target,args,daemon): self.args=args
+            def start(self):
+                profile,data,operation_id,queue=self.args
+                self.data=data; queue.put({"status":"complete","reason":"none","selected":[],"detail_reviewed":[],"attempts":0,"provider_attempts":0,"cache_hits":0,"input_tokens":0,"unknown_usage":0})
+            def join(self,*_): pass
+            def is_alive(self): return False
+        class Context:
+            def Queue(self,maxsize):
+                import queue
+                q=queue.Queue(maxsize); q.close=lambda:None; return q
+            def Process(self,*args,**kwargs):
+                process=Process(*args,**kwargs); self.process=process; return process
+        context=Context()
+        with patch("jev_skill_advisor.service.multiprocessing.get_context",return_value=context):
+            service=SkillAdvisorService(self.profile)
+            service.runtime.key="fake"
+            service.suggest({"protocol_version":1,"request_id":"spawn","session_id":"s","task":"alpha"})
+        self.assertEqual(context.process.data["available_ids"],["warehouse:alpha"])
+
 
 if __name__ == "__main__": unittest.main()

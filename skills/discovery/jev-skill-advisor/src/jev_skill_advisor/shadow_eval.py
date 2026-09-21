@@ -63,12 +63,12 @@ def write_profile(*, cache_root, state_dir, profile_path, harness="pilot", crede
     return {"snapshot_id": status["snapshot_id"], "catalog_hash": catalog["catalog_hash"], "profile_path": str(Path(profile_path).resolve())}
 
 
-def _cases(path, *, max_cases=8, max_attempts=20):
+def _cases(path, *, min_cases=4, max_cases=8, max_attempts=20):
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(raw, dict) or set(raw) not in ({"schema_version", "snapshot_id", "cases"}, {"schema_version", "snapshot_id", "cases", "provider_attempt_cap"}) or raw["schema_version"] != 1:
         raise ShadowEvalError("invalid_cases_file")
     rows = raw["cases"]
-    if not isinstance(rows, list) or not 4 <= len(rows) <= max_cases:
+    if not isinstance(rows, list) or not min_cases <= len(rows) <= max_cases:
         raise ShadowEvalError("invalid_shadow_case_count")
     cap = raw.get("provider_attempt_cap", 20)
     if not isinstance(cap, int) or isinstance(cap, bool) or not 1 <= cap <= max_attempts:
@@ -114,7 +114,7 @@ def run_shadow(*, cache_root=None, profile_path=None, cases_path, report_path,
         profile_path = Path(release_manifest["files"][f"profile:{selected}"]["path"])
         status = {"status": "ready", "snapshot_id": release_manifest["snapshot_id"],
                   "catalog_root": release_manifest["snapshot_root"], "skill_count": release_manifest["skill_count"]}
-        cases = _cases(cases_path, max_cases=12, max_attempts=160)
+        cases = _cases(cases_path, min_cases=2, max_cases=12, max_attempts=160)
         max_attempts = 160
     else:
         status = LibraryCache(cache_root).status()
@@ -145,14 +145,14 @@ def run_shadow(*, cache_root=None, profile_path=None, cases_path, report_path,
                                  read_allowlist=frozenset(), state_dir=eval_state)
     ServiceRuntime(evaluation_profile, initialize=True)
     if service_factory is SkillAdvisorService:
-        consumed = ServiceRuntime(profile).counts().get("provider_attempts", 0)
+        consumed = ServiceRuntime(evaluation_profile).counts().get("provider_attempts", 0)
         remaining = max(0, profile.provider_attempt_limit - consumed)
         allowance = min(cases.get("provider_attempt_cap", max_attempts), remaining)
         if allowance < 1:
             raise ShadowEvalError("provider_attempt_budget_exhausted")
         evaluation_profile = replace(evaluation_profile, provider_attempt_limit=consumed + allowance)
     service = service_factory(evaluation_profile)
-    results = []; detail = []; counts = {key: 0 for key in ("correct_selections", "abstentions", "misses", "wrong_harness_selections", "disagreements", "provider_failures")}
+    results = []; detail = []; counts = {key: 0 for key in ("correct_selections", "abstentions", "misses", "wrong_harness_selections", "disagreements", "provider_failures", "selector_failures")}
     totals = {key: 0 for key in ("provider_attempts", "cache_hits", "input_tokens", "unknown_usage")}; latencies = []
     stopped_reason = None
     for index, case in enumerate(cases["cases"]):
@@ -173,7 +173,17 @@ def run_shadow(*, cache_root=None, profile_path=None, cases_path, report_path,
         if isinstance(telemetry.get("elapsed_ms"), (int, float)): latencies.append(float(telemetry["elapsed_ms"]))
         if totals["provider_attempts"] > cases.get("provider_attempt_cap", max_attempts): raise ShadowEvalError("provider_attempt_budget_exceeded")
         reason = str(response.get("reason"))
-        provider_failure = response.get("status") == "incomplete" or reason in {"protected_input", "provider_unavailable", "prompt_budget", "absolute_deadline", "worker_failure"} or reason.endswith("provider_failure")
+        selector_failure = reason in {"shortlist_overflow", "attempt_budget", "oversized_card_or_request"}
+        provider_failure = (response.get("status") == "incomplete" and not selector_failure) or reason in {"protected_input", "provider_unavailable", "prompt_budget", "absolute_deadline", "worker_failure"} or reason.endswith("provider_failure")
+        if selector_failure:
+            stopped_reason = "shadow_selector_or_policy_stop:" + reason
+            counts["selector_failures"] += 1
+            results.append({"id": case["id"], "expect": case["expect"], "acceptable_ids": sorted(case["acceptable_ids"]),
+                            "selected_ids": selected, "status": response.get("status"), "reason": reason, "label": "selector_failure",
+                            "provider_attempts": int(telemetry.get("provider_attempts", 0)), "cache_hits": int(telemetry.get("cache_hits", 0)),
+                            "input_tokens": int(telemetry.get("input_tokens", 0)), "unknown_usage": int(telemetry.get("unknown_usage", 0)),
+                            "elapsed_ms": telemetry.get("elapsed_ms"), "retrieval": response.get("retrieval")})
+            detail.append({"case": case, "request": request, "response": response}); break
         if provider_failure:
             stopped_reason = "shadow_provider_or_policy_stop:" + reason
             counts["provider_failures"] += 1

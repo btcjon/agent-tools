@@ -274,6 +274,7 @@ def scan(registry, request, context, evaluator, *, floor=0.7, max_optional=5,
                         receipt["unknown_usage"] += 1
                     failed = True
             receipt["scored"] = sorted(scores)
+            receipt["scores"] = dict(scores)
             if failed:
                 return finish("provider_failure")
             if time.monotonic()-started > deadline_s or receipt["input_tokens"] > max_tokens:

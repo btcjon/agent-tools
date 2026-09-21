@@ -10,6 +10,7 @@ from .exposure import Registry, scan
 from .profile import current_policy
 from .protocol import validate_suggest, validate_read, validate_outcome
 from .runtime import ServiceRuntime, iso
+from .retrieval import retrieve
 
 BODY_LIMIT = 32768
 PROTECTED_MARKERS = ("typesafe_api_key=", "jev_api=", "authorization: bearer", "-----begin ")
@@ -44,7 +45,7 @@ class SkillAdvisorService:
         return {"id": sid, "name": name, "description": entry.description[:400],
                 "content_hash": entry.source_hash, "policy_hash": entry.policy_hash}
 
-    def _response(self, data, status, reason, selected=(), candidates=(), evidence="profile", telemetry=None, decision_audit=None):
+    def _response(self, data, status, reason, selected=(), candidates=(), evidence="profile", telemetry=None, decision_audit=None, retrieval=None):
         receipt_id = self.runtime.new_receipt_id()
         allowed = list(dict.fromkeys([*selected, *candidates]))
         now = time.time()
@@ -59,6 +60,8 @@ class SkillAdvisorService:
                    "expires_at": iso(now + self.profile.receipt_ttl_s), "reads": {}}
         if decision_audit is not None:
             receipt["decision_audit"] = decision_audit
+        if retrieval is not None:
+            receipt["retrieval"] = retrieval
         receipt["bindings"] = {sid: {"content_hash": self.profile.entries[sid].source_hash,
                                      "policy_hash": self.profile.entries[sid].policy_hash}
                                for sid in allowed if sid in self.profile.entries}
@@ -70,6 +73,7 @@ class SkillAdvisorService:
                 "availability_evidence": evidence, "catalog_hash": self.profile.catalog_hash,
                 "policy_hash": self.profile.policy_hash,
                 "telemetry": telemetry, **({"decision_audit": decision_audit} if decision_audit is not None else {}),
+                **({"retrieval": retrieval} if retrieval is not None else {}),
                 "advisory_only": True}
 
     def suggest(self, value):
@@ -83,7 +87,12 @@ class SkillAdvisorService:
         # this guard ahead of registry construction also prevents source reads.
         if self.profile.mode == "shadow":
             return self._response(data, "shadow", "profile_shadow", evidence=evidence)
-        registry = self.profile.registry(data["available_ids"], implicit_only=not bool(data["explicit_skills"]))
+        retrieval = None
+        available_ids = data["available_ids"]
+        if not data["explicit_skills"]:
+            retrieval = retrieve(self.profile, data["task"], data["context"], available_ids, limit=12)
+            available_ids = retrieval["candidate_ids"]
+        registry = self.profile.registry(available_ids, implicit_only=not bool(data["explicit_skills"]))
         if data["explicit_skills"]:
             resolved = []
             for requested in data["explicit_skills"]:
@@ -104,7 +113,8 @@ class SkillAdvisorService:
             operation_id = self.runtime.new_receipt_id()
             ctx = multiprocessing.get_context("spawn")
             queue = ctx.Queue(maxsize=1)
-            process = ctx.Process(target=_scan_process, args=(self.profile, data, operation_id, queue), daemon=True)
+            scan_data = {**data, "available_ids": available_ids}
+            process = ctx.Process(target=_scan_process, args=(self.profile, scan_data, operation_id, queue), daemon=True)
             process.start(); process.join(self.profile.deadline_s)
             if process.is_alive():
                 process.terminate(); process.join(0.5)
@@ -134,7 +144,10 @@ class SkillAdvisorService:
                      "cache_hits": receipt.get("cache_hits", 0), "input_tokens": receipt.get("input_tokens", 0),
                      "unknown_usage": receipt.get("unknown_usage", 0),
                      "elapsed_ms": round((time.monotonic() - started) * 1000, 3)}
-        return self._response(data, status, reason, selected, candidates, evidence, telemetry, receipt.get("decision_audit"))
+        if retrieval is not None:
+            retrieval = {**retrieval, "fit_scores": {sid: receipt.get("scores", {}).get(sid) for sid in retrieval["candidate_ids"]},
+                         "selector_reason": reason, "stage_attempts": receipt.get("attempts", 0)}
+        return self._response(data, status, reason, selected, candidates, evidence, telemetry, receipt.get("decision_audit"), retrieval)
 
     def _receipt(self, session_id, receipt_id):
         receipt = self.runtime.load_receipt(receipt_id)
