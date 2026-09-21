@@ -94,7 +94,7 @@ def handle_event(event, *, profile=None, release_root=DEFAULT_RELEASE_ROOT, stat
         if profile is None:
             from .release import ReleaseStore
             release_root=Path(release_root).resolve()
-            release_id,manifest,resolved=ReleaseStore(release_root).resolve_profile(
+            release_id,manifest=ReleaseStore(release_root).resolve(
                 host=socket.gethostname(),harness="codex",session_id=session)
             profile=Path(manifest["files"]["profile:codex"]["path"])
             # Resolution above already validates and pins the immutable release.
