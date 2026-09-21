@@ -59,7 +59,7 @@ class RankChoiceTests(unittest.TestCase):
         self.assertEqual(result["stages"][0]["confidence"], 0.21)
         self.assertLessEqual(result["attempts"], 2)
         self.assertTrue(all(fits(call) for call in calls))
-        self.assertEqual(calls[0]["_cache_identity"]["selection_contract"]["version"], 2)
+        self.assertEqual(calls[0]["_cache_identity"]["selection_contract"]["version"], 3)
         self.assertNotIn("noul", json.dumps(calls[0]["questions"]))
         self.assertIn("choose none", calls[0]["questions"]["winner"]["instructions"].lower())
         self.assertIn("applicability_evidence", calls[0]["state"]["candidates"][0])
@@ -145,9 +145,12 @@ class RankChoiceTests(unittest.TestCase):
             return response
         result = rank_choice_scan(self.registry, "use alpha procedure", "", evaluator)
         self.assertEqual(result["reason"], "source_unavailable")
+        self.assertEqual(result["status"], "incomplete")
         self.assertEqual(result["provider_attempts"], 1)
         self.assertEqual(result["attempts"], 1)
+        self.assertEqual(result["cache_hits"], 0)
         self.assertEqual(result["selected"], [])
+        self.assertEqual(calls, 1)
 
     def test_v1_scan_is_retained(self):
         def evaluator(payload, timeout):
@@ -199,7 +202,7 @@ class RankChoiceServiceTests(unittest.TestCase):
         self.assertEqual(len(result["selected"]), 1)
         self.assertEqual(result["telemetry"]["evaluations"], 2)
         self.assertEqual(result["telemetry"]["choices"], ["A", "skill"])
-        self.assertEqual(runtime.calls[0]["_cache_identity"]["selection_contract"]["version"], 2)
+        self.assertEqual(runtime.calls[0]["_cache_identity"]["selection_contract"]["version"], 3)
 
     def test_none_receipt_never_authorizes_skill_read(self):
         class NoneRuntime(ServiceRuntime):
@@ -211,12 +214,19 @@ class RankChoiceServiceTests(unittest.TestCase):
             runtime.choices = list(choices)
             service = SkillAdvisorService(self.profile, runtime)
             result = service.suggest({"protocol_version": 1, "request_id": request_id, "session_id": "s",
-                                      "task": "unrelated task"})
+                                      "task": "use alpha procedure"})
             self.assertEqual(result["status"], "none")
             self.assertEqual(result["candidates"], [])
+            receipt = runtime.load_receipt(result["receipt_id"])
+            self.assertEqual(receipt["allowed_ids"], [])
+            self.assertEqual(receipt["selected_ids"], [])
+            self.assertEqual(receipt["candidate_ids"], [])
             denied = service.read({"protocol_version": 1, "session_id": "s", "receipt_id": result["receipt_id"],
                                    "skill_id": "warehouse:alpha", "expected_content_hash": self.profile.entries["warehouse:alpha"].source_hash})
             self.assertEqual(denied["status"], "denied")
+            also = service.read({"protocol_version": 1, "session_id": "s", "receipt_id": result["receipt_id"],
+                                 "skill_id": "warehouse:beta", "expected_content_hash": self.profile.entries["warehouse:beta"].source_hash})
+            self.assertEqual(also["status"], "denied")
 
     def test_explicit_is_zero_provider_and_shadow_reads_nothing(self):
         service, runtime = self.service()

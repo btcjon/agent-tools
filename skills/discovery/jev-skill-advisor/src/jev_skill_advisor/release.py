@@ -99,6 +99,18 @@ class ReleaseStore:
         return release_id
 
     def validate(self, release_id: str) -> dict:
+        return self._validate(release_id, verify_snapshot=True)
+
+    def validate_runtime(self, release_id: str) -> dict:
+        """Validate immutable release inputs without rescanning every package.
+
+        Full snapshot verification remains mandatory at build and activation.
+        Runtime selection later verifies the chosen skill bytes against the
+        catalog binding before any body is injected.
+        """
+        return self._validate(release_id, verify_snapshot=False)
+
+    def _validate(self, release_id: str, *, verify_snapshot: bool) -> dict:
         if not isinstance(release_id, str) or len(release_id) != 64 or any(c not in "0123456789abcdef" for c in release_id):
             raise ReleaseError("invalid_release_id")
         path = self.releases / release_id / "manifest.json"
@@ -124,11 +136,12 @@ class ReleaseStore:
             raise ReleaseError("release_snapshot_missing")
         if snapshot_root.name != "skills" or snapshot_root.parent.name != manifest["snapshot_id"]:
             raise ReleaseError("release_snapshot_binding_mismatch")
-        from .library_cache import LibraryCache, LibraryCacheError
-        try:
-            LibraryCache(snapshot_root.parent.parent.parent)._verify(manifest["snapshot_id"])
-        except LibraryCacheError as exc:
-            raise ReleaseError("release_snapshot_tampered") from exc
+        if verify_snapshot:
+            from .library_cache import LibraryCache, LibraryCacheError
+            try:
+                LibraryCache(snapshot_root.parent.parent.parent)._verify(manifest["snapshot_id"])
+            except LibraryCacheError as exc:
+                raise ReleaseError("release_snapshot_tampered") from exc
         catalog_path = Path(manifest["files"]["catalog"]["path"])
         catalog = json.loads(catalog_path.read_text())
         if Path(catalog.get("warehouse_root", "")).resolve() != snapshot_root.resolve():
@@ -200,7 +213,10 @@ class ReleaseStore:
             row = db.execute("SELECT release_id FROM pins WHERE host=? AND harness=? AND session_id=?",
                              (host, harness, session_id)).fetchone()
             if row is None:
-                release_id = self.current()
+                # Activation already performs full snapshot verification. A
+                # request only needs the immutable pointer identity here; the
+                # runtime validation below checks every bound release input.
+                release_id = self._current_identity()
                 if release_id is None:
                     db.execute("ROLLBACK")
                     raise ReleaseError("no_current_release")
@@ -209,7 +225,7 @@ class ReleaseStore:
                 release_id = row["release_id"]
             db.execute("COMMIT")
         # Never silently repin when a retained release is damaged or missing.
-        return release_id, self.validate(release_id)
+        return release_id, self.validate_runtime(release_id)
 
     def resolve_profile(self, *, host: str, harness: str, session_id: str):
         """Resolve and validate the profile bound to this session's release."""

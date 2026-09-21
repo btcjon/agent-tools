@@ -23,6 +23,9 @@ class TestReleaseStore(ReleaseStore):
             return manifest
         return super().validate(release_id)
 
+    def validate_runtime(self, release_id):
+        return self.validate(release_id)
+
 
 def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
