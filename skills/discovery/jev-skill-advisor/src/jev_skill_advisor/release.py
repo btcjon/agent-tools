@@ -236,6 +236,19 @@ def build_shadow_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
     input_id = hashlib.sha256(_canonical(seed)).hexdigest()
     inputs = root / "release-inputs" / input_id
     inputs.mkdir(parents=True, exist_ok=True)
+    preserved_evidence = {}
+    for name, source in sorted(evidence.items()):
+        source = Path(source)
+        destination = inputs / f"evidence-{name}{source.suffix or '.json'}"
+        data = source.read_bytes()
+        if destination.exists() and destination.read_bytes() != data:
+            raise ReleaseError("immutable_release_input_conflict")
+        if not destination.exists():
+            with tempfile.NamedTemporaryFile("wb", dir=inputs, delete=False) as handle:
+                temporary = Path(handle.name); handle.write(data); handle.flush(); os.fsync(handle.fileno())
+            try: os.replace(temporary, destination)
+            finally: temporary.unlink(missing_ok=True)
+        preserved_evidence[name] = destination
     catalog_path = inputs / "catalog.json"
     if catalog_path.exists() and json.loads(catalog_path.read_text()) != catalog:
         raise ReleaseError("immutable_release_input_conflict")
@@ -258,7 +271,7 @@ def build_shadow_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
             raise ReleaseError("profile_catalog_coverage_mismatch")
         ServiceRuntime(profile, initialize=True)
     release_id = ReleaseStore(root).create(snapshot_id=snapshot_id, snapshot_root=snapshot_root,
-        catalog_path=catalog_path, profiles=profiles, evidence=evidence, revision=revision,
+        catalog_path=catalog_path, profiles=profiles, evidence=preserved_evidence, revision=revision,
         _test_unbound=_test_unbound)
     if _test_unbound:
         return release_id, json.loads((ReleaseStore(root).releases/release_id/"manifest.json").read_text())

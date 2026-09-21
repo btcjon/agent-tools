@@ -135,6 +135,10 @@ def test_shadow_release_has_full_profile_coverage_and_is_repeatable(tmp_path):
     assert manifest["skill_count"] == 1
     assert manifest["eligible_skill_count"] == 1
     assert manifest["profiles"] == ["codex", "generic", "hermes"]
+    preserved=Path(manifest["files"]["evidence:parity"]["path"])
+    assert preserved.parent.name and preserved.read_bytes()==evidence.read_bytes()
+    evidence.write_text('{"count":999}')
+    assert preserved.read_text()!=evidence.read_text()
     for harness in manifest["profiles"]:
         profile = json.loads(Path(manifest["files"][f"profile:{harness}"]["path"]).read_text())
         assert profile["mode"] == "shadow" and profile["read_enabled"] is False
