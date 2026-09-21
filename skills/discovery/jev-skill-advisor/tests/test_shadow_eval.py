@@ -159,6 +159,23 @@ def test_disagreement_stays_visible(tmp_path):
     assert report["summary"]["disagreements"] == 1
 
 
+def test_opt_in_failed_decision_stops_before_later_cases(tmp_path):
+    cache, _, profile, cases, _ = prepared(tmp_path)
+    class FirstMiss(FakeService):
+        def suggest(self, request):
+            value = super().suggest(request)
+            if request["task"] == "make a plan":
+                value["selected"] = []
+                value["status"] = "none"
+            return value
+    report = run_shadow(cache_root=cache, profile_path=profile, cases_path=cases,
+                        report_path=tmp_path/"report.json", service_factory=FirstMiss,
+                        stop_on_failed_decision=True)
+    assert report["run_status"] == "failed"
+    assert report["stopped_reason"] == "shadow_failed_decision_stop:miss"
+    assert report["summary"]["case_count"] == 1
+
+
 def test_provider_failure_stops_and_is_not_scored_as_abstention(tmp_path):
     cache, _, profile, cases, _ = prepared(tmp_path)
     class Failed(FakeService):

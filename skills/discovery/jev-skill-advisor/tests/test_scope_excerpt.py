@@ -1,4 +1,4 @@
-from jev_skill_advisor.exposure import scope_excerpt
+from jev_skill_advisor.exposure import Capability, envelope, fits, scope_excerpt
 
 
 def test_scope_excerpt_selects_late_applicability_exclusions_and_procedure():
@@ -57,3 +57,29 @@ def test_detail_excerpt_rejects_marker_in_long_heading_metadata(tmp_path):
     try: detail_envelope("procedure","",[entry])
     except ValueError as exc: assert str(exc)=="protected_skill_excerpt"
     else: raise AssertionError("protected heading metadata was not rejected")
+
+
+def test_screening_cards_include_bounded_source_verbatim_evidence(tmp_path):
+    import hashlib
+    source=tmp_path/"SKILL.md"
+    source.write_text("## Use When\nUpdate database properties through the API.\n## Do Not Use When\nA browser-only workflow was requested.\n## Procedure\nDo the work.\n")
+    digest=hashlib.sha256(source.read_bytes()).hexdigest()
+    entry=Capability("warehouse:notion","skill","Manage Notion",source=str(source),source_hash=digest,policy_hash="p",disclose=True)
+    payload=envelope("update database property","",[entry])
+    card=payload["state"]["capabilities"][0]
+    assert "Update database properties" in card["applicability_evidence"]
+    assert "browser-only" in card["applicability_evidence"]
+    assert len(card["applicability_evidence"].encode()) <= 240
+    assert payload["_cache_identity"][0]["source_hash"] == digest
+    assert fits(payload)
+
+
+def test_screening_cards_reject_protected_content_before_clipping(tmp_path):
+    import hashlib
+    source=tmp_path/"SKILL.md"
+    source.write_text("## Use When\nSafe.\n"+("padding\n"*500)+"Authorization: Bearer SECRET_SENTINEL\n")
+    digest=hashlib.sha256(source.read_bytes()).hexdigest()
+    entry=Capability("x","skill","demo",source=str(source),source_hash=digest,policy_hash="p",disclose=True)
+    try: envelope("safe","",[entry])
+    except ValueError as exc: assert str(exc)=="protected_skill_excerpt"
+    else: raise AssertionError("protected screening source was not rejected")

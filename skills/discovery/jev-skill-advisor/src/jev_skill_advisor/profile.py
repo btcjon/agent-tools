@@ -54,8 +54,8 @@ class HostProfile:
                 continue
             if implicit_only:
                 implicit, policy_hash = current_policy(Path(entry.source), Path(self.package_roots[sid]))
-                head = Path(entry.source).read_text(encoding="utf-8", errors="replace")[:8000].lower()
-                protected = any(marker in (head + "\n" + entry.description.lower()) for marker in ("typesafe_api_key=", "jev_api=", "authorization: bearer", "-----begin "))
+                body = Path(entry.source).read_text(encoding="utf-8", errors="replace").lower()
+                protected = any(marker in (body + "\n" + entry.description.lower()) for marker in ("typesafe_api_key=", "jev_api=", "authorization: bearer", "-----begin "))
                 if not implicit or policy_hash != entry.policy_hash or protected:
                     continue
             if sid in self.runtime_missing:

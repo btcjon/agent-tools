@@ -103,7 +103,7 @@ def _mapping(profile):
 
 def run_shadow(*, cache_root=None, profile_path=None, cases_path, report_path,
                release_root=None, release_id=None, harness=None,
-               service_factory=SkillAdvisorService):
+               service_factory=SkillAdvisorService, stop_on_failed_decision=False):
     release_manifest = None
     if release_root is not None or release_id is not None:
         if cache_root is not None or profile_path is not None or not release_root or not release_id or not harness:
@@ -211,6 +211,9 @@ def run_shadow(*, cache_root=None, profile_path=None, cases_path, report_path,
                "input_tokens": int(telemetry.get("input_tokens", 0)), "unknown_usage": int(telemetry.get("unknown_usage", 0)),
                "elapsed_ms": telemetry.get("elapsed_ms"), "decision_audit": decision_audit}
         results.append(row); detail.append({"case": case, "request": request, "response": response})
+        if stop_on_failed_decision and label not in {"correct_selection", "abstention"}:
+            stopped_reason = "shadow_failed_decision_stop:" + label
+            break
     explicit = [row for row in results if next(case for case in cases["cases"] if case["id"] == row["id"]).get("explicit_skills")]
     if any(row["provider_attempts"] for row in explicit): raise ShadowEvalError("explicit_selection_used_provider")
     replays = [row for row in results if next(case for case in cases["cases"] if case["id"] == row["id"]).get("replay_of")]
@@ -238,8 +241,9 @@ def main(argv=None):
     run.add_argument("--cache-root", type=Path); run.add_argument("--profile", type=Path)
     run.add_argument("--release-root", type=Path); run.add_argument("--release-id"); run.add_argument("--harness")
     run.add_argument("--cases", type=Path, required=True); run.add_argument("--report", type=Path, required=True)
+    run.add_argument("--stop-on-failed-decision", action="store_true")
     args = parser.parse_args(argv)
-    result = write_profile(cache_root=args.cache_root, state_dir=args.state_dir, profile_path=args.profile, harness=args.harness, credential_file=args.credential_file) if args.command == "prepare" else run_shadow(cache_root=args.cache_root, profile_path=args.profile, release_root=args.release_root, release_id=args.release_id, harness=args.harness, cases_path=args.cases, report_path=args.report)
+    result = write_profile(cache_root=args.cache_root, state_dir=args.state_dir, profile_path=args.profile, harness=args.harness, credential_file=args.credential_file) if args.command == "prepare" else run_shadow(cache_root=args.cache_root, profile_path=args.profile, release_root=args.release_root, release_id=args.release_id, harness=args.harness, cases_path=args.cases, report_path=args.report, stop_on_failed_decision=args.stop_on_failed_decision)
     print(json.dumps(result, sort_keys=True, indent=2)); return 3 if result.get("run_status") == "failed" else 0
 
 
