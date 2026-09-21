@@ -339,6 +339,7 @@ def fits(payload):
 
 RANK_CHOICE_LIMIT = 12
 RANK_CHOICE_EXCERPT_BYTES = 1200
+RANK_CHOICE_DESCRIPTION_BYTES = 240
 RANK_SHORTLIST_INSTRUCTIONS = (
     "Choose the single best next skill to load for this task phase within product and harness scope. "
     "If none apply or more than one skill is equally appropriate, choose none. "
@@ -414,8 +415,9 @@ def rank_choice_shortlist_envelope(request, context, entries):
     for index, entry in enumerate(entries):
         body, digest = _skill_source(entry)
         evidence = scope_excerpt(body, query=request + "\n" + context, max_bytes=240)
+        description, _ = _clip_utf8(entry.description, RANK_CHOICE_DESCRIPTION_BYTES)
         cards.append({"option": labels[index], "id": entry.id, "kind": entry.kind,
-                      "description": entry.description,
+                      "description": description,
                       "applicability_evidence": evidence["text"]})
     criteria = {
         labels[index]: (

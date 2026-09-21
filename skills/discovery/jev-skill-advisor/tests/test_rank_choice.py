@@ -77,7 +77,8 @@ class RankChoiceTests(unittest.TestCase):
                     "clear product and harness boundaries.\n\n## Procedure\nFollow the verified steps.\n")
             entry, _, _ = skill(self.root, name, body)
             entry = Capability(entry.id, entry.kind,
-                               f"Procedure for representative workflow {index}; use for bounded operational tasks.",
+                               (f"Procedure for representative workflow {index}; use for bounded operational tasks. "
+                                + "Detailed routing metadata. " * 30),
                                source=entry.source, source_hash=entry.source_hash,
                                policy_hash=entry.policy_hash, disclose=True)
             entries.append(entry)
@@ -85,6 +86,7 @@ class RankChoiceTests(unittest.TestCase):
         self.assertEqual(len(payload["state"]["candidates"]), 12)
         self.assertTrue(fits(payload))
         self.assertTrue(all("source_hash" not in card for card in payload["state"]["candidates"]))
+        self.assertTrue(all(len(card["description"].encode()) <= 240 for card in payload["state"]["candidates"]))
         self.assertEqual(len(payload["_cache_identity"]["capabilities"]), 12)
 
     def test_shortlist_none_and_confirm_none_terminate(self):
