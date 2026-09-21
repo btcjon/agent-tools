@@ -44,3 +44,5 @@ def test_rejects_stale_or_oversize_body(tmp_path):
 def test_rejects_unlinked_or_unsuccessful_result(tmp_path):
     catalog=tmp_path/"catalog.json"; catalog.write_text('{"entries":[]}'); profile=tmp_path/"profile.json"; profile.write_text(json.dumps({"warehouse_root":str(tmp_path),"catalog_path":str(catalog)}))
     assert handle_event(event(),profile=profile,state=tmp_path/"state",runner=lambda *_:{"status":"none","skills":[]})=={}
+    record=json.loads((tmp_path/"state"/"events.jsonl").read_text().splitlines()[-1])
+    assert record["selection_mode"]=="none" and record["fallback_reason"]=="no_selection"

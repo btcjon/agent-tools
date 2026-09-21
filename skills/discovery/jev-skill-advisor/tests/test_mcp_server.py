@@ -20,7 +20,7 @@ class McpServerTests(unittest.IsolatedAsyncioTestCase):
         catalog = root / "catalog.json"; catalog.write_text(json.dumps({"entries": [{"stable_id": "warehouse:alpha", "name": "alpha",
             "description": "alpha procedure", "relative_path": "alpha", "content_hash": hashlib.sha256(skill.read_bytes()).hexdigest()}]}))
         self.config = root / "config.json"; self.config.write_text(json.dumps({"config_version": 1, "profile_id": "mcp-test", "harness": "mcp",
-            "warehouse_root": str(warehouse), "catalog_path": str(catalog), "state_dir": str(root / "state"), "mode": "shadow",
+            "warehouse_root": str(warehouse), "catalog_path": str(catalog), "state_dir": str(root / "state"), "mode": "advisory",
             "provider_enabled": False, "read_enabled": True, "eligible_ids": ["warehouse:alpha"], "read_allowlist": ["warehouse:alpha"]}))
         ServiceRuntime(load_profile(self.config), initialize=True)
 
@@ -49,6 +49,16 @@ class McpServerTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(invalid.is_error)
             invalid_version = await client.call_tool("skill_suggest", {**payload, "protocol_version": True})
             self.assertTrue(invalid_version.is_error)
+
+    async def test_shadow_returns_no_selection_or_body(self):
+        raw=json.loads(self.config.read_text()); raw["mode"]="shadow"; self.config.write_text(json.dumps(raw))
+        async with Client(build_server(self.config), raise_exceptions=True) as client:
+            result=await client.call_tool("skill_suggest", {"protocol_version":1,"request_id":"shadow","session_id":"s","task":"x","explicit_skills":["alpha"]})
+            response=result.structured_content or json.loads(result.content[0].text); response=response.get("result",response)
+            self.assertEqual(response["status"],"shadow"); self.assertEqual(response["selected"],[])
+            read=await client.call_tool("skill_read", {"protocol_version":1,"session_id":"s","receipt_id":response["receipt_id"],"skill_id":"warehouse:alpha","expected_content_hash":"0"*64})
+            body=read.structured_content or json.loads(read.content[0].text); body=body.get("result",body)
+            self.assertEqual(body["status"],"denied")
 
 
 if __name__ == "__main__": unittest.main()

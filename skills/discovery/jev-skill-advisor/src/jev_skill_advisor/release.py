@@ -86,11 +86,13 @@ class ReleaseStore:
         destination = self.releases / release_id
         with self._locked():
             if destination.exists():
-                self.validate(release_id)
+                if not _test_unbound:
+                    self.validate(release_id)
                 return release_id
             destination.mkdir(mode=0o700)
             _atomic(destination / "manifest.json", manifest)
-        self.validate(release_id)
+        if not _test_unbound:
+            self.validate(release_id)
         return release_id
 
     def validate(self, release_id: str) -> dict:
@@ -108,7 +110,7 @@ class ReleaseStore:
             if not candidate.is_file() or _digest(candidate) != item["sha256"]:
                 raise ReleaseError("release_file_tampered")
         if manifest.get("schema_version") == 0:
-            return manifest
+            raise ReleaseError("test_release_not_activatable")
         if manifest.get("schema_version") != 1:
             raise ReleaseError("invalid_release_schema")
         snapshot_root = Path(manifest["snapshot_root"])
@@ -258,4 +260,6 @@ def build_shadow_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
     release_id = ReleaseStore(root).create(snapshot_id=snapshot_id, snapshot_root=snapshot_root,
         catalog_path=catalog_path, profiles=profiles, evidence=evidence, revision=revision,
         _test_unbound=_test_unbound)
+    if _test_unbound:
+        return release_id, json.loads((ReleaseStore(root).releases/release_id/"manifest.json").read_text())
     return release_id, ReleaseStore(root).validate(release_id)

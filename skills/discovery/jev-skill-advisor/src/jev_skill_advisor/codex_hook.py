@@ -109,9 +109,12 @@ def handle_event(event, *, profile=None, release_root=DEFAULT_RELEASE_ROOT, stat
             skill_source=(warehouse/row["relative_path"]/row.get("entrypoint","SKILL.md")).resolve()
             bindings[row["stable_id"]]=(skill_source,root,row["content_hash"])
         request={"session_id":session,"task":prompt,"harness":"codex","explicit_skills":_explicit(prompt),"max_body_bytes":CONTEXT_CAP}
-        result=runner(request,service_source,timeout); context=_context(result,bindings)
+        result=runner(request,service_source,timeout)
         record.update(profile_hash=profile_hash,catalog_hash=result.get("catalog_hash"),policy_hash=result.get("policy_hash"),receipt_id=result.get("receipt_id"),
             stable_ids=result.get("selected_ids",[]),provider_attempts=(result.get("telemetry") or {}).get("provider_attempts"),selection_mode=result.get("status"))
+        if result.get("status") not in {"suggested","explicit_selection"}:
+            record["fallback_reason"]=result.get("reason") or result.get("fallback") or "no_selection"; return {}
+        context=_context(result,bindings)
         if context is None: record["fallback_reason"]=result.get("fallback") or "no_selection"; return {}
         output={"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":context}}
         if len(json.dumps(output,separators=(",",":")).encode())>CONTEXT_CAP: record["fallback_reason"]="context_oversize"; return {}

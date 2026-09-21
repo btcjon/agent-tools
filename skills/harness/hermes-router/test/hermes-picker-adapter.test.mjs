@@ -281,6 +281,8 @@ test("configFromEnv defaults to SSH without requiring a local API key", async ()
   assert.equal(config.transport, "ssh");
   assert.equal(config.sshHost, "hermes-host");
   assert.equal(config.apiKey, undefined);
+  assert.equal(config.skillAdvisorReleaseRoot, "");
+  assert.equal(typeof config.skillAdvisorHost, "string");
 });
 
 test("UI attach uses idempotency-key and {data:[...]} session records without chatting", async () => {

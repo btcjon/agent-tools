@@ -7,6 +7,23 @@ import pytest
 from jev_skill_advisor.release import ReleaseError, ReleaseStore, build_shadow_release
 
 
+class TestReleaseStore(ReleaseStore):
+    __test__ = False
+    def validate(self, release_id):
+        path=self.releases/release_id/"manifest.json"
+        try: manifest=json.loads(path.read_text())
+        except (OSError,json.JSONDecodeError) as exc: raise ReleaseError("missing_or_invalid_release") from exc
+        if manifest.get("schema_version") == 0:
+            from jev_skill_advisor.release import _canonical
+            if hashlib.sha256(_canonical(manifest)).hexdigest() != release_id:
+                raise ReleaseError("release_manifest_tampered")
+            for item in manifest["files"].values():
+                if hashlib.sha256(Path(item["path"]).read_bytes()).hexdigest() != item["sha256"]:
+                    raise ReleaseError("release_file_tampered")
+            return manifest
+        return super().validate(release_id)
+
+
 def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, sort_keys=True) + "\n")
@@ -27,7 +44,7 @@ def make_release(tmp_path, store, name):
 
 
 def test_release_rejects_tampering_and_guards_pointer(tmp_path):
-    store = ReleaseStore(tmp_path / "state")
+    store = TestReleaseStore(tmp_path / "state")
     one = make_release(tmp_path, store, "one"); two = make_release(tmp_path, store, "two")
     store.activate(one, expected_previous=None)
     with pytest.raises(ReleaseError, match="current_release_changed"):
@@ -42,7 +59,7 @@ def test_release_rejects_tampering_and_guards_pointer(tmp_path):
 
 
 def test_session_pins_survive_promote_and_rollback(tmp_path):
-    store = ReleaseStore(tmp_path / "state")
+    store = TestReleaseStore(tmp_path / "state")
     one = make_release(tmp_path, store, "one"); two = make_release(tmp_path, store, "two")
     store.activate(one, expected_previous=None)
     assert store.resolve(host="h", harness="codex", session_id="A")[0] == one
@@ -55,7 +72,7 @@ def test_session_pins_survive_promote_and_rollback(tmp_path):
 
 
 def test_concurrent_first_pin_is_single_and_sticky(tmp_path):
-    store = ReleaseStore(tmp_path / "state"); one = make_release(tmp_path, store, "one")
+    store = TestReleaseStore(tmp_path / "state"); one = make_release(tmp_path, store, "one")
     store.activate(one, expected_previous=None)
     with ThreadPoolExecutor(max_workers=8) as pool:
         values = list(pool.map(lambda _: store.resolve(host="h", harness="generic", session_id="same")[0], range(16)))
@@ -65,13 +82,21 @@ def test_concurrent_first_pin_is_single_and_sticky(tmp_path):
 
 
 def test_missing_pinned_release_does_not_repin(tmp_path):
-    store = ReleaseStore(tmp_path / "state"); one = make_release(tmp_path, store, "one"); two = make_release(tmp_path, store, "two")
+    store = TestReleaseStore(tmp_path / "state"); one = make_release(tmp_path, store, "one"); two = make_release(tmp_path, store, "two")
     store.activate(one, expected_previous=None)
     store.resolve(host="h", harness="hermes", session_id="A")
     store.activate(two, expected_previous=one)
     (store.releases / one / "manifest.json").unlink()
     with pytest.raises(ReleaseError, match="missing_or_invalid_release"):
         store.resolve(host="h", harness="hermes", session_id="A")
+
+
+def test_unbound_test_release_cannot_activate_in_production_store(tmp_path):
+    store=ReleaseStore(tmp_path/"state")
+    release=make_release(tmp_path,store,"unsafe")
+    with pytest.raises(ReleaseError,match="test_release_not_activatable"):
+        store.activate(release,expected_previous=None)
+    assert not store.pointer.exists()
 
 
 def test_profile_resolution_uses_harness_then_generic_and_rejects_mismatch(tmp_path):
@@ -86,7 +111,7 @@ def test_profile_resolution_uses_harness_then_generic_and_rejects_mismatch(tmp_p
             "state_dir": str(tmp_path / f"state-{harness}"), "mode": "shadow", "provider_enabled": True,
             "read_enabled": False, "eligible_ids": ["warehouse:alpha"], "read_allowlist": []})
     evidence = write_json(tmp_path / "evidence.json", {"ok": True})
-    store = ReleaseStore(tmp_path / "releases")
+    store = TestReleaseStore(tmp_path / "releases")
     release = store.create(snapshot_id="s", snapshot_root=snapshot, catalog_path=catalog,
                            profiles=profiles, evidence={"parity": evidence}, revision="abc", _test_unbound=True)
     store.activate(release, expected_previous=None)

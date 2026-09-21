@@ -45,6 +45,8 @@ export function configFromEnv(env = process.env) {
     allowedArtifactRoots,
     skillInjectionEnabled: String(env.HERMES_PICKER_SKILL_INJECTION || "false") === "true",
     skillAdvisorProfile: env.HERMES_PICKER_SKILL_PROFILE || "",
+    skillAdvisorReleaseRoot: env.HERMES_PICKER_SKILL_RELEASE_ROOT || "",
+    skillAdvisorHost: env.HERMES_PICKER_SKILL_HOST || os.hostname(),
     skillAdvisorExecutable: env.HERMES_PICKER_SKILL_EXECUTABLE || "skill-advisor-service",
     skillAdvisorTimeoutMs: Number(env.HERMES_PICKER_SKILL_TIMEOUT_MS || 7000),
     skillBodyMaxBytes: Number(env.HERMES_PICKER_SKILL_BODY_MAX_BYTES || 32768),
@@ -285,6 +287,7 @@ export class HermesPickerAdapter {
     this.activeSessions = new Map();
     this.skillPreparer = options.skillPreparer || (this.config.skillInjectionEnabled ? createPrepareContextClient({
       executable: this.config.skillAdvisorExecutable, profile: this.config.skillAdvisorProfile,
+      releaseRoot: this.config.skillAdvisorReleaseRoot, host: this.config.skillAdvisorHost,
       timeoutMs: this.config.skillAdvisorTimeoutMs, maxBodyBytes: this.config.skillBodyMaxBytes,
     }) : null);
   }
