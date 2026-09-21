@@ -23,3 +23,37 @@ def test_scope_excerpt_focuses_long_procedure_on_request_terms():
     assert "typed database properties" in value["text"]
     procedure=next(item for item in value["sections"] if item["heading"]=="Procedure")
     assert procedure["selected_lines"] is not None
+    assert procedure["selected_lines"]==sorted(procedure["selected_lines"])
+    assert procedure["omitted_content"] is True
+
+
+def test_detail_excerpt_rejects_protected_markers_outside_file_prefix(tmp_path):
+    import hashlib
+    from jev_skill_advisor.exposure import Capability,detail_envelope
+    source=tmp_path/"SKILL.md"; source.write_text("# Intro\n"+("safe\n"*2000)+"## Procedure\nAuthorization: Bearer secret\n")
+    entry=Capability("x","skill","demo",source=str(source),source_hash=hashlib.sha256(source.read_bytes()).hexdigest(),policy_hash="p",disclose=True)
+    try: detail_envelope("authorization procedure","",[entry])
+    except ValueError as exc: assert str(exc)=="protected_skill_excerpt"
+    else: raise AssertionError("protected excerpt was not rejected")
+
+
+def test_detail_excerpt_rejects_marker_hidden_by_relevant_line_clipping(tmp_path):
+    import hashlib
+    from jev_skill_advisor.exposure import Capability,detail_envelope
+    source=tmp_path/"SKILL.md"
+    source.write_text("## Procedure\nAuthorization: Bearer SECRET_SENTINEL "+("padding "*300)+"database update\n")
+    entry=Capability("x","skill","demo",source=str(source),source_hash=hashlib.sha256(source.read_bytes()).hexdigest(),policy_hash="p",disclose=True)
+    try: detail_envelope("database update","",[entry])
+    except ValueError as exc: assert str(exc)=="protected_skill_excerpt"
+    else: raise AssertionError("clipped protected source was not rejected")
+
+
+def test_detail_excerpt_rejects_marker_in_long_heading_metadata(tmp_path):
+    import hashlib
+    from jev_skill_advisor.exposure import Capability,detail_envelope
+    source=tmp_path/"SKILL.md"
+    source.write_text("## Procedure "+("padding "*300)+"Authorization: Bearer SECRET_SENTINEL\nSafe body.\n")
+    entry=Capability("x","skill","demo",source=str(source),source_hash=hashlib.sha256(source.read_bytes()).hexdigest(),policy_hash="p",disclose=True)
+    try: detail_envelope("procedure","",[entry])
+    except ValueError as exc: assert str(exc)=="protected_skill_excerpt"
+    else: raise AssertionError("protected heading metadata was not rejected")

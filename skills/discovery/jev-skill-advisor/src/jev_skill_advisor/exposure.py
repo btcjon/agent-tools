@@ -21,6 +21,7 @@ MODEL = "jev-1.13.0"
 FIT = "Does this capability materially support the requested task phase within its stated action, product, and harness scope?"
 CRITERIA = {"true": "Directly supports the requested task phase in the stated scope.",
             "false": "Only topical overlap, a different product or harness, or unnecessary for this task phase."}
+PROTECTED_MARKERS = ("typesafe_api_key=", "jev_api=", "authorization: bearer", "-----begin ")
 
 
 def digest(value):
@@ -141,8 +142,8 @@ def envelope(request, context, entries):
 
 
 SECTION_PRIORITIES = (
-    (0, re.compile(r"\b(use when|when to use|applicability|scope|triggers?)\b", re.I)),
     (1, re.compile(r"\b(do not use|not for|exclusions?|boundaries|limitations?)\b", re.I)),
+    (0, re.compile(r"\b(use when|when to use|applicability|scope|triggers?)\b", re.I)),
     (2, re.compile(r"\b(workflow|procedure|how to|steps|usage|operations?)\b", re.I)),
 )
 
@@ -151,6 +152,28 @@ def _clip_utf8(value, limit):
     raw=value.encode("utf-8")
     if len(raw)<=limit: return value,False
     return raw[:limit].decode("utf-8",errors="ignore"),True
+
+
+def _clip_relevant_line(value, limit, query_tokens):
+    raw=value.encode("utf-8")
+    if len(raw)<=limit: return value,False
+    lowered=value.lower(); positions=[lowered.find(token) for token in query_tokens if lowered.find(token)>=0]
+    starts={max(0,position-limit//3) for position in positions} or {0}
+    def quality(start):
+        window=raw[start:start+limit].decode("utf-8",errors="ignore").lower()
+        return (sum(token in window for token in query_tokens),-start)
+    start=max(starts,key=quality); clipped=raw[start:start+limit].decode("utf-8",errors="ignore")
+    return clipped,True
+
+
+def _evidence_tokens(value):
+    result=set()
+    for token in re.findall(r"[a-z0-9]+",value.lower()):
+        if len(token)<=2: continue
+        if token.endswith("ies") and len(token)>4: token=token[:-3]+"y"
+        elif token.endswith("s") and len(token)>3: token=token[:-1]
+        result.add(token)
+    return result
 
 
 def scope_excerpt(body, *, query="", max_bytes=1200):
@@ -181,21 +204,35 @@ def scope_excerpt(body, *, query="", max_bytes=1200):
         end=start+max(0,excerpt.count("\n"))
         return {"text":excerpt,"sections":[{"heading":None,"start_line":start,"end_line":end,"truncated":truncated}],"truncated":truncated,"fallback":True}
     allowance=max_bytes//len(selected); parts=[]; metadata=[]; any_truncated=False
-    query_tokens={token for token in re.findall(r"[a-z0-9]+",query.lower()) if len(token)>2}
+    query_tokens=_evidence_tokens(query)
     for priority,start,end,title,text in selected:
-        selected_lines=None
+        selected_lines=None; partial_lines=[]; focused_omissions=False
         if priority==2 and len(text.encode())>allowance and query_tokens:
             block_lines=text.splitlines(); scored=[]
             for offset,line in enumerate(block_lines[1:],1):
-                overlap=len(query_tokens & set(re.findall(r"[a-z0-9]+",line.lower())))
+                overlap=len(query_tokens & _evidence_tokens(line))
                 if overlap: scored.append((-overlap,offset,line))
-            chosen=sorted(scored)[:3]
+            chosen=sorted(scored)[:1]
             if chosen:
-                focused=[block_lines[0],*(line for _,_,line in chosen)]
-                text="\n".join(focused); selected_lines=[start,*[start+offset for _,offset,_ in chosen]]
+                source_lines=[start,*[start+offset for _,offset,_ in chosen]]
+                source_text=[block_lines[0],*(line for _,_,line in chosen)]
+                per_line=max(1,(allowance-max(0,len(source_text)-1))//len(source_text))
+                emitted=[]
+                for position,(line_number,line) in enumerate(zip(source_lines,source_text)):
+                    clipped_line,partial=(_clip_utf8(line,per_line) if position==0 else _clip_relevant_line(line,per_line,query_tokens)); emitted.append(clipped_line)
+                    if partial: partial_lines.append(line_number)
+                text="\n".join(emitted); selected_lines=source_lines; focused_omissions=True
         clipped,truncated=_clip_utf8(text,allowance)
-        actual_end=min(end,start+clipped.count("\n")); parts.append(clipped)
-        metadata.append({"heading":title,"start_line":start,"end_line":actual_end,"selected_lines":selected_lines,"truncated":truncated})
+        if selected_lines is not None:
+            included=min(len(selected_lines),clipped.count("\n")+1)
+            selected_lines=selected_lines[:included]
+            actual_end=max(selected_lines)
+            truncated=truncated or included < len(source_lines) or focused_omissions
+        else:
+            actual_end=min(end,start+clipped.count("\n"))
+        parts.append(clipped)
+        metadata.append({"heading":title,"start_line":start,"end_line":actual_end,"selected_lines":selected_lines,
+                         "partial_lines":partial_lines,"omitted_content":focused_omissions,"truncated":truncated})
         any_truncated=any_truncated or truncated
     combined="\n\n".join(parts)
     combined,outer_truncated=_clip_utf8(combined,max_bytes)
@@ -210,7 +247,11 @@ def detail_envelope(request, context, entries):
         if hashlib.sha256(raw).hexdigest() != entry.source_hash:
             raise ValueError("stale_source")
         body = raw.decode("utf-8", errors="replace")
+        if any(marker in (body + "\n" + entry.description).lower() for marker in PROTECTED_MARKERS):
+            raise ValueError("protected_skill_excerpt")
         excerpt=scope_excerpt(body,query=request+"\n"+context)
+        if any(marker in json.dumps(excerpt, sort_keys=True).lower() for marker in PROTECTED_MARKERS):
+            raise ValueError("protected_skill_excerpt")
         candidates.append({
             "option": labels[index],
             "id": entry.id,
