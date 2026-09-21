@@ -173,7 +173,8 @@ def run_shadow(*, cache_root=None, profile_path=None, cases_path, report_path,
         if isinstance(telemetry.get("elapsed_ms"), (int, float)): latencies.append(float(telemetry["elapsed_ms"]))
         if totals["provider_attempts"] > cases.get("provider_attempt_cap", max_attempts): raise ShadowEvalError("provider_attempt_budget_exceeded")
         reason = str(response.get("reason"))
-        selector_failure = reason in {"shortlist_overflow", "attempt_budget", "oversized_card_or_request"}
+        selector_failure = reason in {"shortlist_overflow", "attempt_budget", "oversized_card_or_request",
+                                      "rank_choice_attempt_budget", "rank_choice_malformed"}
         provider_failure = (response.get("status") == "incomplete" and not selector_failure) or reason in {"protected_input", "provider_unavailable", "prompt_budget", "absolute_deadline", "worker_failure"} or reason.endswith("provider_failure")
         if selector_failure:
             stopped_reason = "shadow_selector_or_policy_stop:" + reason
@@ -209,7 +210,10 @@ def run_shadow(*, cache_root=None, profile_path=None, cases_path, report_path,
                "status": response.get("status"), "reason": response.get("reason"), "label": label,
                "provider_attempts": int(telemetry.get("provider_attempts", 0)), "cache_hits": int(telemetry.get("cache_hits", 0)),
                "input_tokens": int(telemetry.get("input_tokens", 0)), "unknown_usage": int(telemetry.get("unknown_usage", 0)),
-               "elapsed_ms": telemetry.get("elapsed_ms"), "decision_audit": decision_audit}
+               "elapsed_ms": telemetry.get("elapsed_ms"), "decision_audit": decision_audit,
+               "choices": telemetry.get("choices"), "stage_names": telemetry.get("stage_names"),
+               "confidences": telemetry.get("confidences"), "source_hashes": telemetry.get("source_hashes"),
+               "selection_contract_version": telemetry.get("selection_contract_version")}
         results.append(row); detail.append({"case": case, "request": request, "response": response})
         if stop_on_failed_decision and label not in {"correct_selection", "abstention"}:
             stopped_reason = "shadow_failed_decision_stop:" + label

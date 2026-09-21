@@ -337,6 +337,231 @@ def fits(payload):
     return len(json.dumps(wire["state"]).encode()) <= 8000 and len(json.dumps(wire).encode()) <= 16000
 
 
+RANK_CHOICE_LIMIT = 12
+RANK_CHOICE_EXCERPT_BYTES = 1200
+RANK_SHORTLIST_INSTRUCTIONS = (
+    "Choose the single best next skill to load for this task phase within product and harness scope. "
+    "If none apply or more than one skill is equally appropriate, choose none. "
+    "Do not treat truncated card text as a complete executable procedure."
+)
+RANK_CONFIRM_INSTRUCTIONS = (
+    "Confirm whether loading this complete skill would materially help the current task phase "
+    "and match product and harness scope. Truncated text is evidence about the complete skill, "
+    "not a complete executable procedure. Choose none if evidence is insufficient or the skill would not help."
+)
+
+
+def rank_choice_contract():
+    return {
+        "version": 2,
+        "kind": "rank_choice",
+        "stages": ["shortlist", "confirm"],
+        "evidence_role": SELECTION_EVIDENCE_ROLE,
+        "shortlist": {
+            "instructions": RANK_SHORTLIST_INSTRUCTIONS,
+            "candidate_criterion": (
+                "Select {option} only if loading the complete skill for candidates[{index}] "
+                "would materially help this task phase and match product and harness scope."
+            ),
+            "none_criterion": (
+                "Choose none if no candidate would materially help, evidence is insufficient, "
+                "or more than one skill would be equally appropriate."
+            ),
+        },
+        "confirm": {
+            "instructions": RANK_CONFIRM_INSTRUCTIONS,
+            "skill_criterion": (
+                "Loading the complete skill would materially help this task phase within product and harness scope."
+            ),
+            "none_criterion": (
+                "Choose none if evidence is insufficient or the complete skill would not materially help."
+            ),
+        },
+    }
+
+
+def _skill_source(entry):
+    raw = Path(entry.source).read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    if digest != entry.source_hash:
+        raise ValueError("stale_source")
+    body = raw.decode("utf-8", errors="replace")
+    if any(marker in (body + "\n" + entry.description).lower() for marker in PROTECTED_MARKERS):
+        raise ValueError("protected_skill_excerpt")
+    return body, digest
+
+
+def _safe_rank_entries(entries):
+    kept = []
+    for entry in entries:
+        if entry.kind != "skill" or not entry.source:
+            continue
+        try:
+            _skill_source(entry)
+        except ValueError as exc:
+            if str(exc) == "protected_skill_excerpt":
+                continue
+            raise
+        kept.append(entry)
+        if len(kept) >= RANK_CHOICE_LIMIT:
+            break
+    return kept
+
+
+def rank_choice_shortlist_envelope(request, context, entries):
+    labels = [chr(ord("A") + i) for i in range(len(entries))]
+    cards = []
+    for index, entry in enumerate(entries):
+        body, digest = _skill_source(entry)
+        evidence = scope_excerpt(body, query=request + "\n" + context, max_bytes=240)
+        cards.append({"option": labels[index], "id": entry.id, "kind": entry.kind,
+                      "description": entry.description,
+                      "applicability_evidence": evidence["text"]})
+    criteria = {
+        labels[index]: (
+            f"Select {labels[index]} only if loading the complete skill for candidates[{index}] "
+            "would materially help this task phase and match product and harness scope."
+        )
+        for index in range(len(entries))
+    }
+    criteria["none"] = (
+        "Choose none if no candidate would materially help, evidence is insufficient, "
+        "or more than one skill would be equally appropriate."
+    )
+    questions = {"winner": {"type": "choice", "instructions": RANK_SHORTLIST_INSTRUCTIONS,
+                             "criteria": criteria}}
+    return {"model": MODEL, "_cache_identity": {"selection_contract": rank_choice_contract(), "stage": "shortlist",
+            "capabilities": [{"id": e.id, "source_hash": e.source_hash, "policy_hash": e.policy_hash} for e in entries]},
+            "state": {"request": request, "context": context, "candidates": cards, "data_handling": DATA_HANDLING},
+            "questions": questions}
+
+
+def rank_choice_confirm_envelope(request, context, entry):
+    body, digest = _skill_source(entry)
+    excerpt = scope_excerpt(body, query=request + "\n" + context, max_bytes=RANK_CHOICE_EXCERPT_BYTES)
+    if any(marker in json.dumps(excerpt, sort_keys=True).lower() for marker in PROTECTED_MARKERS):
+        raise ValueError("protected_skill_excerpt")
+    text, clipped = _clip_utf8(excerpt["text"], RANK_CHOICE_EXCERPT_BYTES)
+    excerpt = {**excerpt, "text": text, "truncated": excerpt["truncated"] or clipped}
+    candidate = {"option": "skill", "id": entry.id, "description": entry.description, "source_hash": digest,
+                 "scope_excerpt": excerpt["text"], "scope_excerpt_sections": excerpt["sections"],
+                 "scope_excerpt_truncated": excerpt["truncated"], "scope_excerpt_fallback": excerpt["fallback"]}
+    questions = {"winner": {"type": "choice", "instructions": RANK_CONFIRM_INSTRUCTIONS, "criteria": {
+        "skill": "Loading the complete skill would materially help this task phase within product and harness scope.",
+        "none": "Choose none if evidence is insufficient or the complete skill would not materially help.",
+    }}}
+    return {"model": MODEL, "_cache_identity": {"selection_contract": rank_choice_contract(), "stage": "confirm",
+            "capabilities": [{"id": entry.id, "source_hash": entry.source_hash, "policy_hash": entry.policy_hash}]},
+            "state": {"request": request, "context": context, "candidates": [candidate], "data_handling": DATA_HANDLING},
+            "questions": questions}
+
+
+def rank_choice_scan(registry, request, context, evaluator, *, deadline_s=5.0, max_calls=2, max_tokens=200000):
+    if (not math.isfinite(deadline_s) or deadline_s <= 0 or any(not isinstance(n, int) or isinstance(n, bool) or n < 1
+            for n in (max_calls, max_tokens))):
+        raise ValueError("invalid_scan_configuration")
+    started = time.monotonic()
+    receipt = {"status": "incomplete", "reason": None, "selected": [], "eligible": [], "attempts": 0,
+               "provider_attempts": 0, "cache_hits": 0, "input_tokens": 0, "unknown_usage": 0,
+               "stages": [], "choices": [], "selection_contract_version": 2}
+    def finish(reason, status="incomplete"):
+        receipt.update(reason=reason, status=status, elapsed_ms=round((time.monotonic()-started)*1000, 3))
+        if status != "complete":
+            receipt["selected"] = []
+        return receipt
+    if not request.strip():
+        return finish("missing_context")
+    try:
+        entries = _safe_rank_entries(registry.eligible())
+    except ValueError as exc:
+        return finish(str(exc))
+    receipt["eligible"] = [entry.id for entry in entries]
+    if not entries:
+        return finish("none", "complete")
+
+    def run_stage(name, payload):
+        if receipt["attempts"] >= max_calls or receipt["attempts"] >= 2:
+            return None, "rank_choice_attempt_budget"
+        if time.monotonic()-started >= deadline_s or receipt["input_tokens"] >= max_tokens:
+            return None, "deadline_or_token_budget"
+        if not fits(payload):
+            return None, "oversized_card_or_request"
+        receipt["attempts"] += 1
+        accounted = False
+        stage_started = time.monotonic()
+        try:
+            response = evaluator(payload, max(0.001, deadline_s-(time.monotonic()-started)))
+            cache_hit = response.get("_cache_hit") is True
+            receipt["cache_hits" if cache_hit else "provider_attempts"] += 1
+            accounted = True
+            usage = response.get("usage", {}).get("input_tokens")
+            if isinstance(usage, int) and not isinstance(usage, bool) and usage >= 0:
+                receipt["input_tokens"] += usage
+            else:
+                receipt["unknown_usage"] += 1
+            validate_response(response, payload["questions"], MODEL)
+        except Exception as exc:
+            if not accounted and str(exc) != "provider_attempt_budget":
+                receipt["provider_attempts"] += 1
+                receipt["unknown_usage"] += 1
+            if "probabilities" in str(exc) or "choice" in str(exc) or "invalid" in str(exc):
+                return None, "rank_choice_malformed"
+            return None, "rank_choice_provider_failure"
+        if time.monotonic()-started > deadline_s or receipt["input_tokens"] > max_tokens:
+            return None, "deadline_or_token_budget"
+        winner = response["answers"]["winner"]
+        candidates = payload["state"]["candidates"]
+        option_ids = {row["option"]: row["id"] for row in candidates}
+        option_ids["none"] = None
+        if name == "confirm":
+            option_ids = {"skill": candidates[0]["id"], "none": None}
+        payload_hash = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        contract_hash = hashlib.sha256(json.dumps(payload["_cache_identity"]["selection_contract"],
+                                                   sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        receipt["stages"].append({
+            "name": name, "choice": winner["choice"], "confidence": winner.get("confidence"),
+            "probabilities": winner.get("probabilities"),
+            "option_ids": option_ids,
+            "source_hashes": [row["source_hash"] for row in payload["_cache_identity"]["capabilities"]],
+            "cache_hit": cache_hit, "contract_version": 2, "input_tokens": usage if isinstance(usage, int) else None,
+            "elapsed_ms": round((time.monotonic() - stage_started) * 1000, 3),
+            "payload_hash": payload_hash, "contract_hash": contract_hash,
+        })
+        receipt["choices"].append(winner["choice"])
+        return winner, None
+
+    try:
+        shortlist = rank_choice_shortlist_envelope(request, context, entries)
+    except OSError:
+        return finish("source_unavailable")
+    except ValueError as exc:
+        return finish(str(exc))
+    winner, error = run_stage("shortlist", shortlist)
+    if error:
+        return finish(error)
+    if winner["choice"] == "none":
+        return finish("rank_choice_none", "complete")
+    labels = [chr(ord("A") + i) for i in range(len(entries))]
+    if winner["choice"] not in labels:
+        return finish("rank_choice_malformed")
+    provisional = entries[labels.index(winner["choice"])]
+    try:
+        confirm = rank_choice_confirm_envelope(request, context, provisional)
+    except OSError:
+        return finish("source_unavailable")
+    except ValueError as exc:
+        return finish(str(exc))
+    confirmed, error = run_stage("confirm", confirm)
+    if error:
+        return finish(error)
+    if confirmed["choice"] == "none":
+        return finish("rank_choice_confirm_none", "complete")
+    if confirmed["choice"] != "skill":
+        return finish("rank_choice_malformed")
+    receipt["selected"] = [provisional.id]
+    return finish("rank_choice_selected", "complete")
+
+
 def detail_selection_audit(confidence, fit, *, confidence_floor=0.65, fit_floor=0.8, cache_hit=False, decision="selection"):
     values = (confidence, fit, confidence_floor, fit_floor)
     if any(not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or not 0 <= value <= 1 for value in values):

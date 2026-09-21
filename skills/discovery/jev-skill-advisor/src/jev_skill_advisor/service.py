@@ -6,7 +6,7 @@ import multiprocessing
 from pathlib import Path
 import time
 
-from .exposure import Registry, scan
+from .exposure import Registry, rank_choice_scan, scan
 from .profile import current_policy
 from .protocol import validate_suggest, validate_read, validate_outcome
 from .runtime import ServiceRuntime, iso
@@ -25,9 +25,9 @@ def _scan_process(profile, data, operation_id, queue):
     try:
         runtime = ServiceRuntime(profile, operation_id=operation_id)
         registry = profile.registry(data["available_ids"], implicit_only=True)
-        queue.put(scan(registry, data["task"], data["context"], runtime.evaluator,
-                       deadline_s=profile.deadline_s, max_calls=profile.max_calls,
-                       max_tokens=profile.max_tokens, max_optional=3, detail_review=True))
+        queue.put(rank_choice_scan(registry, data["task"], data["context"], runtime.evaluator,
+                       deadline_s=profile.deadline_s, max_calls=min(2, profile.max_calls),
+                       max_tokens=profile.max_tokens))
     except BaseException as exc:
         queue.put({"status": "incomplete", "reason": "worker_failure", "selected": [],
                    "detail_reviewed": [], "attempts": 0, "provider_attempts": 0,
@@ -126,28 +126,41 @@ class SkillAdvisorService:
                 receipt = queue.get_nowait() if not queue.empty() else {"status": "incomplete", "reason": "worker_failure",
                     "selected": [], "detail_reviewed": [], "attempts": 0, "provider_attempts": 0,
                     "cache_hits": 0, "input_tokens": 0, "unknown_usage": 1}
+            ledger_attempts = self.runtime.counts(operation_id).get("operation_attempts", 0)
+            reported_attempts = int(receipt.get("provider_attempts", 0))
+            if ledger_attempts > reported_attempts:
+                receipt["unknown_usage"] = int(receipt.get("unknown_usage", 0)) + ledger_attempts - reported_attempts
+                receipt["provider_attempts"] = ledger_attempts
             queue.close()
         else:
-            receipt = scan(registry, data["task"], data["context"], self.runtime.evaluator,
-                           deadline_s=self.profile.deadline_s, max_calls=self.profile.max_calls,
-                           max_tokens=self.profile.max_tokens, max_optional=3, detail_review=True)
+            receipt = rank_choice_scan(registry, data["task"], data["context"], self.runtime.evaluator,
+                           deadline_s=self.profile.deadline_s, max_calls=min(2, self.profile.max_calls),
+                           max_tokens=self.profile.max_tokens)
         reason = receipt.get("reason") or "unknown"
-        if receipt["status"] == "complete" and receipt.get("selected"):
-            status, selected, candidates = "suggested", receipt["selected"], []
+        selected = list(receipt.get("selected") or [])
+        if len(selected) > 1:
+            status, selected, candidates = "incomplete", [], []
+            reason = "rank_choice_multiple_selected"
+        elif receipt["status"] == "complete" and selected:
+            status, candidates = "suggested", []
         elif receipt["status"] == "complete":
-            status, selected, candidates = "none", [], receipt.get("detail_reviewed", [])[:3]
-        elif receipt["status"] == "uncertain":
-            status, selected, candidates = "uncertain", [], receipt.get("detail_reviewed", [])[:3]
+            status, candidates = "none", []
         else:
-            status, selected, candidates = "incomplete", [], receipt.get("detail_reviewed", [])[:3]
+            status, selected, candidates = "incomplete", [], []
+        stages = receipt.get("stages") or []
         telemetry = {"evaluations": receipt.get("attempts", 0), "provider_attempts": receipt.get("provider_attempts", 0),
                      "cache_hits": receipt.get("cache_hits", 0), "input_tokens": receipt.get("input_tokens", 0),
                      "unknown_usage": receipt.get("unknown_usage", 0),
-                     "elapsed_ms": round((time.monotonic() - started) * 1000, 3)}
+                     "elapsed_ms": round((time.monotonic() - started) * 1000, 3),
+                     "selection_contract_version": receipt.get("selection_contract_version", 2),
+                     "choices": receipt.get("choices", []),
+                     "stage_names": [row.get("name") for row in stages],
+                     "confidences": [row.get("confidence") for row in stages],
+                     "source_hashes": [hash_ for row in stages for hash_ in row.get("source_hashes", [])]}
         if retrieval is not None:
-            retrieval = {**retrieval, "fit_scores": {sid: receipt.get("scores", {}).get(sid) for sid in retrieval["candidate_ids"]},
-                         "selector_reason": reason, "stage_attempts": receipt.get("attempts", 0)}
-        return self._response(data, status, reason, selected, candidates, evidence, telemetry, receipt.get("decision_audit"), retrieval)
+            retrieval = {**retrieval, "selector_reason": reason, "stage_attempts": receipt.get("attempts", 0),
+                         "stages": stages}
+        return self._response(data, status, reason, selected, candidates, evidence, telemetry, None, retrieval)
 
     def _receipt(self, session_id, receipt_id):
         receipt = self.runtime.load_receipt(receipt_id)

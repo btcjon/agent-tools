@@ -18,13 +18,26 @@ class FakeRuntime(ServiceRuntime):
 
     def evaluator(self, payload, timeout):
         self.calls.append(deepcopy(payload))
-        if "winner" in payload["questions"]:
-            labels = [key[4:] for key in payload["questions"] if key.startswith("fit_")]
-            probs = {label: 0.0 for label in [*labels, "none"]}; probs[labels[0]] = .95; probs["none"] = .05
-            answers = {"winner": {"type": "choice", "choice": labels[0], "confidence": .95, "probabilities": probs}}
-            answers.update({f"fit_{label}": {"type": "noul", "noul": .95 if i == 0 else .1} for i, label in enumerate(labels)})
+        questions = payload["questions"]
+        if "winner" in questions:
+            options = list(questions["winner"]["criteria"])
+            if any(key.startswith("fit_") for key in questions):
+                labels = [key[4:] for key in questions if key.startswith("fit_")]
+                choice = labels[0]
+                probs = {label: 0.0 for label in [*labels, "none"]}; probs[choice] = .95; probs["none"] = .05
+                answers = {"winner": {"type": "choice", "choice": choice, "confidence": .95, "probabilities": probs}}
+                answers.update({f"fit_{label}": {"type": "noul", "noul": .95 if i == 0 else .1} for i, label in enumerate(labels)})
+            else:
+                named = [opt for opt in options if opt != "none"]
+                choice = "skill" if "skill" in options else (named[0] if named else "none")
+                probs = {opt: 0.0 for opt in options}; probs[choice] = .95
+                if "none" in options and choice != "none":
+                    probs["none"] = .05
+                elif named and choice != named[0]:
+                    probs[named[0]] = .05
+                answers = {"winner": {"type": "choice", "choice": choice, "confidence": .95, "probabilities": probs}}
         else:
-            answers = {key: {"type": "noul", "noul": .95 if i == 0 else .1} for i, key in enumerate(payload["questions"])}
+            answers = {key: {"type": "noul", "noul": .95 if i == 0 else .1} for i, key in enumerate(questions)}
         return {"model": MODEL, "usage": {"input_tokens": 5}, "answers": answers, "_cache_hit": False}
 
 
@@ -165,6 +178,29 @@ class ServiceTests(unittest.TestCase):
             service.runtime.key="fake"
             service.suggest({"protocol_version":1,"request_id":"spawn","session_id":"s","task":"alpha"})
         self.assertEqual(context.process.data["available_ids"],["warehouse:alpha"])
+
+    def test_spawn_worker_reconciles_recorded_provider_attempt(self):
+        from unittest.mock import patch
+        class Process:
+            def __init__(self,target,args,daemon): self.args=args
+            def start(self):
+                profile,data,operation_id,queue=self.args
+                child = ServiceRuntime(profile, operation_id=operation_id)
+                self.assert_reserved = child._reserve("provider_attempts", profile.provider_attempt_limit)
+                queue.put({"status":"incomplete","reason":"worker_failure","selected":[],"attempts":0,
+                           "provider_attempts":0,"cache_hits":0,"input_tokens":0,"unknown_usage":0})
+            def join(self,*_): pass
+            def is_alive(self): return False
+        class Context:
+            def Queue(self,maxsize):
+                import queue
+                q=queue.Queue(maxsize); q.close=lambda:None; return q
+            def Process(self,*args,**kwargs): return Process(*args,**kwargs)
+        with patch("jev_skill_advisor.service.multiprocessing.get_context",return_value=Context()):
+            service=SkillAdvisorService(self.profile); service.runtime.key="fake"
+            result=service.suggest({"protocol_version":1,"request_id":"ledger","session_id":"s","task":"alpha"})
+        self.assertEqual(result["telemetry"]["provider_attempts"],1)
+        self.assertEqual(result["telemetry"]["unknown_usage"],1)
 
 
 if __name__ == "__main__": unittest.main()
