@@ -123,14 +123,18 @@ def run_shadow(*, cache_root, profile_path, cases_path, report_path, service_fac
         raise ShadowEvalError("profile_eligibility_mismatch")
     mapping = _mapping(profile)
     case_hash = _json_hash(cases)
+    # Live shadow mode is deliberately a no-op. Evaluation uses a private
+    # advisory clone bound to the same read-disabled profile and isolated
+    # runtime so it can score selections without authorizing body delivery.
+    evaluation_profile = replace(profile, mode="advisory", read_enabled=False, read_allowlist=frozenset())
     if service_factory is SkillAdvisorService:
         consumed = ServiceRuntime(profile).counts().get("provider_attempts", 0)
         remaining = max(0, profile.provider_attempt_limit - consumed)
         allowance = min(cases.get("provider_attempt_cap", 20), remaining)
         if allowance < 1:
             raise ShadowEvalError("provider_attempt_budget_exhausted")
-        profile = replace(profile, provider_attempt_limit=consumed + allowance)
-    service = service_factory(profile)
+        evaluation_profile = replace(evaluation_profile, provider_attempt_limit=consumed + allowance)
+    service = service_factory(evaluation_profile)
     results = []; detail = []; counts = {key: 0 for key in ("correct_selections", "abstentions", "misses", "wrong_harness_selections", "disagreements", "provider_failures")}
     totals = {key: 0 for key in ("provider_attempts", "cache_hits", "input_tokens", "unknown_usage")}; latencies = []
     stopped_reason = None

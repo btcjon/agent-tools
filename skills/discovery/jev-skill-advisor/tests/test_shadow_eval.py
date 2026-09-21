@@ -48,7 +48,9 @@ class FakeService:
     calls = 0
     seen = {}
 
-    def __init__(self, profile): self.profile = profile
+    def __init__(self, profile):
+        assert profile.mode == "advisory" and profile.read_enabled is False and not profile.read_allowlist
+        self.profile = profile
     def read(self, value): raise AssertionError("shadow evaluator must not read skill bodies")
     def suggest(self, request):
         type(self).calls += 1
