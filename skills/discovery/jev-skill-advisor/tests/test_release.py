@@ -104,6 +104,7 @@ def test_shadow_release_has_full_profile_coverage_and_is_repeatable(tmp_path):
     assert first == second
     assert manifest == repeated
     assert manifest["skill_count"] == 1
+    assert manifest["eligible_skill_count"] == 1
     assert manifest["profiles"] == ["codex", "generic", "hermes"]
     for harness in manifest["profiles"]:
         profile = json.loads(Path(manifest["files"][f"profile:{harness}"]["path"]).read_text())

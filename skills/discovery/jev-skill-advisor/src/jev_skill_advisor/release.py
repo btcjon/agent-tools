@@ -73,9 +73,10 @@ class ReleaseStore:
         files.update({f"evidence:{name}": {"path": str(Path(path).resolve()), "sha256": _digest(Path(path))}
                       for name, path in sorted(evidence.items())})
         catalog = json.loads(catalog_path.read_text())
-        ids = sorted(row["stable_id"] for row in catalog.get("entries", []))
+        ids = sorted({row["stable_id"] for row in [*catalog.get("entries", []), *catalog.get("exclusions", [])]})
         manifest = {"schema_version": 1, "snapshot_id": snapshot_id, "snapshot_root": str(snapshot_root),
                     "catalog_hash": files["catalog"]["sha256"], "skill_count": len(ids),
+                    "eligible_skill_count": len(catalog.get("entries", [])),
                     "stable_ids_hash": hashlib.sha256(_canonical(ids)).hexdigest(),
                     "profiles": sorted(profiles), "files": files, "implementation_revision": revision}
         release_id = hashlib.sha256(_canonical(manifest)).hexdigest()
@@ -170,6 +171,9 @@ def build_shadow_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
     root = Path(root).resolve(); snapshot_root = Path(snapshot_root).resolve()
     catalog = build_catalog(snapshot_root)
     stable_ids = sorted(row["stable_id"] for row in catalog["entries"])
+    all_ids = sorted({row["stable_id"] for row in [*catalog["entries"], *catalog.get("exclusions", [])]})
+    if len(all_ids) != catalog["included_count"] + catalog["excluded_count"]:
+        raise ReleaseError("catalog_identity_coverage_mismatch")
     seed = {"snapshot_id": snapshot_id, "catalog_hash": catalog["catalog_hash"],
             "revision": revision, "harnesses": sorted(harnesses),
             "evidence": {name: _digest(Path(path)) for name, path in sorted(evidence.items())}}
