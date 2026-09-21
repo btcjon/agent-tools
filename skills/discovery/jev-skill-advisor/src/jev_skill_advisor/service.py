@@ -45,6 +45,10 @@ class SkillAdvisorService:
         return {"id": sid, "name": name, "description": entry.description[:400],
                 "content_hash": entry.source_hash, "policy_hash": entry.policy_hash}
 
+    def _emergency_stopped(self):
+        path = self.profile.emergency_stop_file
+        return path is not None and path.exists()
+
     def _response(self, data, status, reason, selected=(), candidates=(), evidence="profile", telemetry=None, decision_audit=None, retrieval=None):
         receipt_id = self.runtime.new_receipt_id()
         allowed = list(dict.fromkeys([*selected, *candidates]))
@@ -80,6 +84,8 @@ class SkillAdvisorService:
         data = validate_suggest(value)
         started = time.monotonic()
         evidence = "session_verified" if data["available_ids"] is not None else "profile"
+        if self._emergency_stopped():
+            return self._response(data, "off", "emergency_stop", evidence=evidence)
         if self.profile.mode == "off":
             return self._response(data, "off", "profile_off", evidence=evidence)
         # Shadow mode may evaluate through the separate bounded shadow runner, but
@@ -173,6 +179,10 @@ class SkillAdvisorService:
 
     def read(self, value):
         data = validate_read(value)
+        if self._emergency_stopped():
+            return {"protocol_version": 1, "status": "denied", "reason": "emergency_stop",
+                    "receipt_id": data["receipt_id"], "skill_id": data["skill_id"],
+                    "advisory_only": True}
         # This is intentionally before receipt lookup so shadow cannot touch a
         # receipt or a skill body, including one created before a mode change.
         if self.profile.mode == "shadow":
@@ -222,6 +232,9 @@ class SkillAdvisorService:
 
     def report_outcome(self, value):
         data = validate_outcome(value)
+        if self._emergency_stopped():
+            return {"protocol_version": 1, "status": "denied", "reason": "emergency_stop",
+                    "event_id": data["event_id"]}
         receipt = self._receipt(data["session_id"], data["receipt_id"])
         if data["skill_id"] not in receipt["allowed_ids"]:
             raise ValueError("unrelated_skill")

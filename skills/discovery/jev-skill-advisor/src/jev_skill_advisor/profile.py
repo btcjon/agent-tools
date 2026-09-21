@@ -36,6 +36,7 @@ class HostProfile:
     receipt_ttl_s: int
     prompt_limit: int
     provider_attempt_limit: int
+    emergency_stop_file: Path | None
     entries: dict[str, Capability]
     names: dict[str, list[str]]
     catalog_hash: str
@@ -100,7 +101,7 @@ def current_policy(source: Path, package_root: Path | None = None):
 def load_profile(path: Path) -> HostProfile:
     raw = json.loads(path.read_text(encoding="utf-8"))
     required = {"config_version", "profile_id", "harness", "warehouse_root", "catalog_path", "state_dir", "mode", "provider_enabled", "read_enabled", "eligible_ids", "read_allowlist"}
-    if not isinstance(raw, dict) or set(raw) - (required | {"credential_env", "credential_file", "deadline_s", "max_calls", "max_tokens", "receipt_ttl_s", "prompt_limit", "provider_attempt_limit"}) or not required <= set(raw):
+    if not isinstance(raw, dict) or set(raw) - (required | {"credential_env", "credential_file", "deadline_s", "max_calls", "max_tokens", "receipt_ttl_s", "prompt_limit", "provider_attempt_limit", "emergency_stop_file"}) or not required <= set(raw):
         raise ProfileError("invalid_profile_fields")
     if raw["config_version"] != 1 or raw["mode"] not in {"off", "shadow", "advisory"}:
         raise ProfileError("invalid_profile_version_or_mode")
@@ -181,6 +182,9 @@ def load_profile(path: Path) -> HostProfile:
     credential_file = Path(raw["credential_file"]).expanduser().resolve() if raw.get("credential_file") else None
     if credential_file and (control_root == credential_file or control_root in credential_file.parents):
         raise ProfileError("credential_inside_warehouse")
+    emergency_stop_file = Path(raw["emergency_stop_file"]).expanduser().resolve() if raw.get("emergency_stop_file") else None
+    if emergency_stop_file and (control_root == emergency_stop_file or control_root in emergency_stop_file.parents):
+        raise ProfileError("emergency_stop_inside_warehouse")
     state.mkdir(parents=True, exist_ok=True)
     os.chmod(state, 0o700)
     return HostProfile(raw["profile_id"], raw["harness"], warehouse, catalog_path, state, raw["mode"],
@@ -188,5 +192,5 @@ def load_profile(path: Path) -> HostProfile:
         raw.get("credential_env"), credential_file, float(raw.get("deadline_s", 5)),
         int(raw.get("max_calls", 32)), int(raw.get("max_tokens", 200000)),
         int(raw.get("receipt_ttl_s", 86400)), int(raw.get("prompt_limit", 20)),
-        int(raw.get("provider_attempt_limit", 160)), entries, names,
+        int(raw.get("provider_attempt_limit", 160)), emergency_stop_file, entries, names,
         hashlib.sha256(catalog_bytes).hexdigest(), policy_digest.hexdigest(), package_roots, frozenset(runtime_missing))

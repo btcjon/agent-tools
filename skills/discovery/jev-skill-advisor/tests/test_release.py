@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from jev_skill_advisor.release import ReleaseError, ReleaseStore, build_shadow_release
+from jev_skill_advisor.release import ReleaseError, ReleaseStore, build_release, build_shadow_release
 
 
 class TestReleaseStore(ReleaseStore):
@@ -143,3 +143,18 @@ def test_shadow_release_has_full_profile_coverage_and_is_repeatable(tmp_path):
         profile = json.loads(Path(manifest["files"][f"profile:{harness}"]["path"]).read_text())
         assert profile["mode"] == "shadow" and profile["read_enabled"] is False
         assert profile["eligible_ids"] == ["warehouse:alpha"]
+
+
+def test_release_activation_profiles_are_strict_and_repeatable(tmp_path):
+    snapshot = tmp_path / "snapshot"; skill = snapshot / "alpha" / "SKILL.md"
+    skill.parent.mkdir(parents=True); skill.write_text("---\nname: alpha\ndescription: alpha procedure\n---\n")
+    evidence = write_json(tmp_path / "parity.json", {"count": 1})
+    for activation, mode, read_enabled in (("selection", "advisory", False), ("delivery", "advisory", True)):
+        release_id, manifest = build_release(root=tmp_path / activation, snapshot_id="s", snapshot_root=snapshot,
+            evidence={"parity": evidence}, revision="abc", activation=activation, _test_unbound=True)
+        assert release_id and manifest["activation"] == activation
+        for harness in manifest["profiles"]:
+            profile = json.loads(Path(manifest["files"][f"profile:{harness}"]["path"]).read_text())
+            assert profile["mode"] == mode and profile["read_enabled"] is read_enabled
+            assert profile["read_allowlist"] == (["warehouse:alpha"] if read_enabled else [])
+            assert profile["emergency_stop_file"].endswith("EMERGENCY_STOP")

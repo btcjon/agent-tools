@@ -101,6 +101,9 @@ def handle_event(event, *, profile=None, release_root=DEFAULT_RELEASE_ROOT, stat
         else:
             profile=Path(profile).resolve(); service_source=profile
         profile_raw=json.loads(profile.read_text(encoding="utf-8")); profile_hash=hashlib.sha256(profile.read_bytes()).hexdigest()
+        emergency=profile_raw.get("emergency_stop_file")
+        if emergency and Path(emergency).expanduser().resolve().exists():
+            record["fallback_reason"]="emergency_stop"; return {}
         warehouse=Path(profile_raw.get("warehouse_root", "")); snapshot_hash=warehouse.parent.name if warehouse.name=="skills" and re.fullmatch(r"[0-9a-f]{64}",warehouse.parent.name) else None
         record.update(profile_hash=profile_hash,snapshot_hash=snapshot_hash,release_id=release_id)
         catalog=json.loads(Path(profile_raw["catalog_path"]).read_text(encoding="utf-8")); bindings={}

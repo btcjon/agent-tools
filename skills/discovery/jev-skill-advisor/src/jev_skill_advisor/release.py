@@ -66,7 +66,9 @@ class ReleaseStore:
 
     def create(self, *, snapshot_id: str, snapshot_root: Path, catalog_path: Path,
                profiles: dict[str, Path], evidence: dict[str, Path], revision: str,
-               _test_unbound: bool = False) -> str:
+               activation: str = "shadow", _test_unbound: bool = False) -> str:
+        if activation not in {"shadow", "selection", "delivery"}:
+            raise ReleaseError("invalid_activation")
         if not _test_unbound and set(evidence) != {"inventory", "parity", "tests"}:
             raise ReleaseError("release_evidence_missing")
         snapshot_root = Path(snapshot_root).resolve(); catalog_path = Path(catalog_path).resolve()
@@ -77,7 +79,8 @@ class ReleaseStore:
                       for name, path in sorted(evidence.items())})
         catalog = json.loads(catalog_path.read_text())
         ids = sorted({row["stable_id"] for row in [*catalog.get("entries", []), *catalog.get("exclusions", [])]})
-        manifest = {"schema_version": 0 if _test_unbound else 1, "snapshot_id": snapshot_id, "snapshot_root": str(snapshot_root),
+        manifest = {"schema_version": 0 if _test_unbound else 2, "activation": activation,
+                    "snapshot_id": snapshot_id, "snapshot_root": str(snapshot_root),
                     "catalog_hash": files["catalog"]["sha256"], "skill_count": len(ids),
                     "eligible_skill_count": len(catalog.get("entries", [])),
                     "stable_ids_hash": hashlib.sha256(_canonical(ids)).hexdigest(),
@@ -111,8 +114,11 @@ class ReleaseStore:
                 raise ReleaseError("release_file_tampered")
         if manifest.get("schema_version") == 0:
             raise ReleaseError("test_release_not_activatable")
-        if manifest.get("schema_version") != 1:
+        if manifest.get("schema_version") not in {1, 2}:
             raise ReleaseError("invalid_release_schema")
+        activation = "shadow" if manifest["schema_version"] == 1 else manifest.get("activation")
+        if activation not in {"shadow", "selection", "delivery"}:
+            raise ReleaseError("invalid_release_activation")
         snapshot_root = Path(manifest["snapshot_root"])
         if not snapshot_root.is_dir():
             raise ReleaseError("release_snapshot_missing")
@@ -132,9 +138,14 @@ class ReleaseStore:
             raise ReleaseError("release_catalog_coverage_mismatch")
         for harness in manifest["profiles"]:
             raw = json.loads(Path(manifest["files"][f"profile:{harness}"]["path"]).read_text())
+            expected = {"shadow": ("shadow", False), "selection": ("advisory", False),
+                        "delivery": ("advisory", True)}[activation]
             if (raw.get("harness") != harness or Path(raw.get("warehouse_root", "")).resolve() != snapshot_root.resolve()
                     or Path(raw.get("catalog_path", "")).resolve() != catalog_path.resolve()
-                    or raw.get("mode") != "shadow" or raw.get("read_enabled") is not False):
+                    or (raw.get("mode"), raw.get("read_enabled")) != expected
+                    or (activation == "delivery" and set(raw.get("read_allowlist", [])) != set(raw.get("eligible_ids", [])))
+                    or (activation != "delivery" and raw.get("read_allowlist") != [])
+                    or not raw.get("emergency_stop_file")):
                 raise ReleaseError("release_profile_binding_mismatch")
         inventory_item = manifest["files"].get("evidence:inventory")
         parity_item = manifest["files"].get("evidence:parity")
@@ -214,11 +225,14 @@ class ReleaseStore:
         return release_id, manifest, profile
 
 
-def build_shadow_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
+def build_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
                          evidence: dict[str, Path], revision: str,
+                         activation: str,
                          harnesses=("codex", "hermes", "generic"),
                          _test_unbound: bool = False) -> tuple[str, dict]:
-    """Build a deterministic, read-disabled release without activating it."""
+    """Build a deterministic immutable release without activating it."""
+    if activation not in {"shadow", "selection", "delivery"}:
+        raise ReleaseError("invalid_activation")
     from .catalog_cli import build_catalog
     from .production_cli import atomic_json
     from .profile import load_profile
@@ -230,7 +244,7 @@ def build_shadow_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
     all_ids = sorted({row["stable_id"] for row in [*catalog["entries"], *catalog.get("exclusions", [])]})
     if len(all_ids) != catalog["included_count"] + catalog["excluded_count"]:
         raise ReleaseError("catalog_identity_coverage_mismatch")
-    seed = {"snapshot_id": snapshot_id, "catalog_hash": catalog["catalog_hash"],
+    seed = {"snapshot_id": snapshot_id, "catalog_hash": catalog["catalog_hash"], "activation": activation,
             "revision": revision, "harnesses": sorted(harnesses),
             "evidence": {name: _digest(Path(path)) for name, path in sorted(evidence.items())}}
     input_id = hashlib.sha256(_canonical(seed)).hexdigest()
@@ -258,9 +272,12 @@ def build_shadow_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
         path = inputs / f"profile-{harness}.json"
         value = {"config_version": 1, "profile_id": f"{harness}-{input_id[:12]}", "harness": harness,
                  "warehouse_root": str(snapshot_root), "catalog_path": str(catalog_path),
-                 "state_dir": str(root / "runtime" / harness), "mode": "shadow",
-                 "provider_enabled": True, "read_enabled": False, "eligible_ids": stable_ids,
-                 "read_allowlist": [], "credential_env": "TYPESAFE_API_KEY", "deadline_s": 5,
+                 "state_dir": str(root / "runtime" / harness),
+                 "mode": "shadow" if activation == "shadow" else "advisory",
+                 "provider_enabled": True, "read_enabled": activation == "delivery", "eligible_ids": stable_ids,
+                 "read_allowlist": stable_ids if activation == "delivery" else [],
+                 "emergency_stop_file": str(root / "EMERGENCY_STOP"),
+                 "credential_env": "TYPESAFE_API_KEY", "deadline_s": 5,
                  "max_calls": 32, "max_tokens": 200000, "receipt_ttl_s": 86400,
                  "prompt_limit": 20, "provider_attempt_limit": 160}
         if path.exists() and json.loads(path.read_text()) != value:
@@ -272,7 +289,11 @@ def build_shadow_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
         ServiceRuntime(profile, initialize=True)
     release_id = ReleaseStore(root).create(snapshot_id=snapshot_id, snapshot_root=snapshot_root,
         catalog_path=catalog_path, profiles=profiles, evidence=preserved_evidence, revision=revision,
-        _test_unbound=_test_unbound)
+        activation=activation, _test_unbound=_test_unbound)
     if _test_unbound:
         return release_id, json.loads((ReleaseStore(root).releases/release_id/"manifest.json").read_text())
     return release_id, ReleaseStore(root).validate(release_id)
+
+
+def build_shadow_release(**kwargs):
+    return build_release(activation="shadow", **kwargs)

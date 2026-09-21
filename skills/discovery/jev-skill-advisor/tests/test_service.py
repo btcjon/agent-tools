@@ -104,6 +104,22 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(read["status"], "denied")
         self.assertEqual(read["reason"], "profile_shadow")
 
+    def test_emergency_stop_overrides_pinned_profile_for_selection_and_read(self):
+        stop = Path(self.tmp.name) / "EMERGENCY_STOP"
+        raw = json.loads(self.config.read_text())
+        raw["emergency_stop_file"] = str(stop)
+        self.config.write_text(json.dumps(raw))
+        profile = load_profile(self.config); runtime = FakeRuntime(profile)
+        service = SkillAdvisorService(profile, runtime)
+        before = service.suggest({"protocol_version": 1, "request_id": "before", "session_id": "pinned", "task": "alpha"})
+        self.assertEqual(before["status"], "suggested")
+        stop.touch()
+        after = service.suggest({"protocol_version": 1, "request_id": "after", "session_id": "pinned", "task": "alpha"})
+        self.assertEqual((after["status"], after["reason"]), ("off", "emergency_stop"))
+        read = service.read({"protocol_version": 1, "session_id": "pinned", "receipt_id": before["receipt_id"],
+                             "skill_id": "warehouse:alpha", "expected_content_hash": before["selected"][0]["content_hash"]})
+        self.assertEqual((read["status"], read["reason"]), ("denied", "emergency_stop"))
+
     def test_denied_read_and_foreign_receipt(self):
         result = self.suggest()
         denied = self.service.read({"protocol_version": 1, "session_id": "s1", "receipt_id": result["receipt_id"],
