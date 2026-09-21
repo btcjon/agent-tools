@@ -63,7 +63,7 @@ guardrails:
 
 def test_accepts_only_observed_notion_normalizations():
     result = compare_markdown(EXPECTED, NORMALIZED, title="sample-skill")
-    assert result["comparator_version"] == 4
+    assert result["comparator_version"] == 5
     assert {"removed_matching_leading_h1", "notion_html_table", "plain_text_fence_label", "escaped_emphasis_markers"} <= set(result["normalization_rules"])
 
 
@@ -170,3 +170,94 @@ def test_two_paragraphs_cannot_be_merged_into_one_line():
     changed = expected.replace("First paragraph.\n\nSecond paragraph.", "First paragraph. Second paragraph.")
     with pytest.raises(FidelityError):
         compare_markdown(expected, changed, title="sample-skill")
+
+
+def test_accepts_three_space_ordered_list_continuation_normalized_by_notion():
+    expected = EXPECTED.replace(
+        "- First\n  continuation\n  - Nested",
+        "1. First ordered item starts here and\n   continues on the next source line.\n2. Second item.",
+    )
+    actual = NORMALIZED.replace(
+        "- First\n\tcontinuation\n\t- Nested",
+        "1. First ordered item starts here and continues on the next source line.\n2. Second item.",
+    )
+    compare_markdown(expected, actual, title="sample-skill", profile="page")
+
+
+def test_accepts_notion_flattening_fenced_code_nested_under_list():
+    expected = EXPECTED.replace(
+        "```text\nif allowed:\n    run(\"exact\")\n```",
+        "  ```bash\n  python3 scripts/check.py\n  ```",
+    )
+    actual = NORMALIZED.replace(
+        "```plain text\nif allowed:\n    run(\"exact\")\n```",
+        "```bash\npython3 scripts/check.py\n```",
+    )
+    compare_markdown(expected, actual, title="sample-skill", profile="page")
+
+
+def test_accepts_notion_tab_container_for_fence_nested_under_list():
+    expected = EXPECTED.replace(
+        "```text\nif allowed:\n    run(\"exact\")\n```",
+        "  ```bash\n  python3 scripts/check.py\n  ```",
+    )
+    actual = NORMALIZED.replace(
+        "```plain text\nif allowed:\n    run(\"exact\")\n```",
+        "\t```bash\npython3 scripts/check.py\n\t```",
+    )
+    compare_markdown(expected, actual, title="sample-skill", profile="page")
+
+
+def test_source_tab_indented_fence_is_not_reinterpreted_as_notion_container():
+    expected = EXPECTED.replace(
+        '```text\nif allowed:\n    run("exact")\n```',
+        '\t```sh\necho KEEP\n\t```',
+    )
+    actual = expected.replace('\t```sh\necho KEEP\n\t```', '```sh\necho KEEP\n```')
+    with pytest.raises(FidelityError, match="unsupported_fence_indentation"):
+        compare_markdown(expected, actual, title="sample-skill", profile="page")
+
+
+@pytest.mark.parametrize("profile", ["page", "export"])
+@pytest.mark.parametrize("block", ["> Never delete", "---"])
+@pytest.mark.parametrize("source,indent", [("1. Follow policy", "   "), ("- Follow policy", "  ")])
+def test_list_block_construct_cannot_be_flattened_into_paragraph_text(profile, block, source, indent):
+    expected = EXPECTED.replace(
+        "- First\n  continuation\n  - Nested",
+        f"{source}\n{indent}{block}",
+    )
+    changed = expected.replace(f"{source}\n{indent}{block}", f"{source} {block}")
+    with pytest.raises(FidelityError):
+        compare_markdown(expected, changed, title="sample-skill", profile=profile)
+
+
+@pytest.mark.parametrize("profile", ["page", "export"])
+def test_four_space_literal_code_cannot_be_treated_as_fenced_code(profile):
+    expected = EXPECTED.replace(
+        '```text\nif allowed:\n    run("exact")\n```',
+        '    ```sh\n    echo KEEP\n    ```',
+    )
+    changed = expected.replace('    ```sh\n    echo KEEP\n    ```', '```sh\necho KEEP\n```')
+    with pytest.raises(FidelityError, match="unsupported_fence_indentation"):
+        compare_markdown(expected, changed, title="sample-skill", profile=profile)
+
+
+@pytest.mark.parametrize("profile", ["page", "export"])
+def test_fence_dedent_removes_up_to_opening_indent_per_line(profile):
+    expected = EXPECTED.replace(
+        '```text\nif allowed:\n    run("exact")\n```',
+        '  ```sh\n if ok:\n    run()\n  ```',
+    )
+    actual = expected.replace('  ```sh\n if ok:\n    run()\n  ```', '```sh\nif ok:\n  run()\n```')
+    compare_markdown(expected, actual, title="sample-skill", profile=profile)
+
+
+@pytest.mark.parametrize("profile", ["page", "export"])
+def test_fence_partial_dedent_does_not_accept_changed_indentation(profile):
+    expected = EXPECTED.replace(
+        '```text\nif allowed:\n    run("exact")\n```',
+        '  ```sh\n if ok:\n    run()\n  ```',
+    )
+    changed = expected.replace('  ```sh\n if ok:\n    run()\n  ```', '```sh\n if ok:\n  run()\n```')
+    with pytest.raises(FidelityError):
+        compare_markdown(expected, changed, title="sample-skill", profile=profile)

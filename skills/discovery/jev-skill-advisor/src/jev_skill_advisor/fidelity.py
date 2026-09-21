@@ -9,7 +9,7 @@ from html.parser import HTMLParser
 import yaml
 
 
-VERSION = 4
+VERSION = 5
 METADATA_HEADING = "## Preserved source metadata"
 METADATA_NOTICE = "The following metadata is part of the canonical skill contract and remains authoritative for this pilot."
 
@@ -167,7 +167,10 @@ def _normalize_emphasis(lines, *, global_blocks=False):
                 if not following.strip(): break
                 nested = re.match(r"([ \t]*)(?:[-+*]|\d+[.)])\s+", following)
                 leading = re.match(r"^[ \t]*", following).group()
-                if nested or not leading or _indent(leading) <= base: break
+                # CommonMark ordered-list continuations are commonly indented
+                # three spaces. They are paragraph continuation text, not a
+                # nested list level, so compare raw visual width here.
+                if nested or not leading or _indent_width(leading) <= base * 2: break
                 index += 1
         else:
             while index < len(output):
@@ -179,6 +182,16 @@ def _normalize_emphasis(lines, *, global_blocks=False):
                 index += 1
         chunk = "\n".join(output[left:index])
         output[left:index] = normalize_chunk(chunk).split("\n")
+    # Slice replacement above can move the cursor across a later line when
+    # Notion changes list/fence indentation. Make the pass idempotent so no
+    # residual emphasis marker escapes normalization.
+    fenced = False
+    for position, line in enumerate(output):
+        if re.fullmatch(r"\s*```.*", line):
+            fenced = not fenced
+            continue
+        if not fenced:
+            output[position] = normalize_chunk(line)
     return output, rules
 
 
@@ -309,7 +322,23 @@ def _indent(value):
     return width // 2
 
 
-def _structure(lines, title, *, merge_wrapped=False):
+def _indent_width(value):
+    """Measure continuation indentation without imposing nested-list syntax."""
+    return sum(2 if char == "\t" else 1 for char in value)
+
+
+def _is_block_construct(text):
+    """Return whether indented text starts a block, not list paragraph text."""
+    stripped = text.strip()
+    return bool(
+        stripped.startswith(("```", "~~~", "#", "<", "|", ">"))
+        or re.fullmatch(r"(?:\*\s*){3,}", stripped)
+        or re.fullmatch(r"(?:-\s*){3,}", stripped)
+        or re.fullmatch(r"(?:_\s*){3,}", stripped)
+    )
+
+
+def _structure(lines, title, *, merge_wrapped=False, allow_notion_fence_tab=False):
     lines, wrapper_rules = _normalize_export_wrappers(lines)
     lines, emphasis_rules = _normalize_emphasis(lines, global_blocks=merge_wrapped)
     tokens = []; rules = set(emphasis_rules) | set(wrapper_rules); index = 0
@@ -329,14 +358,29 @@ def _structure(lines, title, *, merge_wrapped=False):
         table = _gfm_table(lines, index)
         if table:
             token, index = table; tokens.append(token); rules.add("gfm_table"); continue
-        fence = re.fullmatch(r"\s*```(.*)", line)
+        fence = re.fullmatch(r"(\s*)```(.*)", line)
         if fence:
-            label = fence.group(1).strip()
+            fence_indent = fence.group(1)
+            notion_tab = fence_indent == "\t" and allow_notion_fence_tab
+            if ("\t" in fence_indent and not notion_tab) or (not notion_tab and len(fence_indent) > 3):
+                raise FidelityError("unsupported_fence_indentation")
+            # Notion represents a source fence nested two spaces under a list
+            # with one tab and has already removed that container indentation.
+            fence_width = 0 if notion_tab else len(fence_indent)
+            if notion_tab:
+                rules.add("tab_list_indentation")
+            label = fence.group(2).strip()
             normalized = "text" if label in {"text", "plain text", "txt"} else label
             if label in {"plain text", "txt"}: rules.add("plain_text_fence_label")
             body = []; index += 1
             while index < len(lines) and not re.fullmatch(r"\s*```\s*", lines[index]):
-                body.append(lines[index].rstrip("\r")); index += 1
+                value = lines[index].rstrip("\r")
+                if fence_width:
+                    if value.startswith("\t"):
+                        raise FidelityError("unsupported_fence_body_indentation")
+                    leading_spaces = len(value) - len(value.lstrip(" "))
+                    value = value[min(fence_width, leading_spaces):]
+                body.append(value); index += 1
             if index >= len(lines): raise FidelityError("unterminated_code_fence")
             tokens.append(("code", normalized, tuple(body))); index += 1; continue
         heading = re.fullmatch(r"(#{1,6})\s+(.+)", line.strip())
@@ -345,7 +389,20 @@ def _structure(lines, title, *, merge_wrapped=False):
         listed = re.fullmatch(r"([ \t]*)([-+*]|\d+[.)])\s+(.+)", line)
         if listed:
             marker = "unordered" if not listed.group(2)[0].isdigit() else ("ordered", int(re.match(r"\d+", listed.group(2)).group()))
-            tokens.append(("list", _indent(listed.group(1)), marker, _inline(listed.group(3))))
+            level = _indent(listed.group(1)); content = listed.group(3)
+            # A three-space continuation under an ordered item is valid
+            # CommonMark and Notion folds it into the list paragraph.
+            while index + 1 < len(lines):
+                following = lines[index + 1]
+                leading = re.match(r"^[ \t]*", following).group()
+                width = _indent_width(leading)
+                if (not following.strip() or _is_block_construct(following)
+                        or re.match(r"[ \t]*(?:[-+*]|\d+[.)])\s+", following)
+                        or width <= level * 2):
+                    break
+                content += " " + following[len(leading):]
+                index += 1
+            tokens.append(("list", level, marker, _inline(content)))
             if "\t" in listed.group(1): rules.add("tab_list_indentation")
             index += 1; continue
         leading = re.match(r"^[ \t]*", line).group()
@@ -358,7 +415,8 @@ def _structure(lines, title, *, merge_wrapped=False):
     for token in tokens:
         if token[0] == "line" and merged and merged[-1][0] == "line" and merged[-1][1] == token[1]:
             merged[-1] = ("line", token[1], _inline(merged[-1][2] + " " + token[2]))
-        elif token[0] == "line" and merged and merged[-1][0] == "list" and token[1] > merged[-1][1]:
+        elif (token[0] == "line" and merged and merged[-1][0] == "list"
+                and token[1] > merged[-1][1] and not _is_block_construct(token[2])):
             prior = merged[-1]
             merged[-1] = (prior[0], prior[1], prior[2], _inline(prior[3] + " " + token[2]))
         else:
@@ -439,7 +497,12 @@ def compare_markdown(expected, actual, *, title, profile="page"):
         raise FidelityError("metadata_semantic_mismatch")
     if profile == "export": _ensure_export_lines_do_not_cross_paragraphs(expected_body, actual_body)
     expected_structure, expected_rules = _structure(expected_body, title, merge_wrapped=profile == "export")
-    actual_structure, actual_rules = _structure(actual_body, title, merge_wrapped=profile == "export")
+    actual_structure, actual_rules = _structure(
+        actual_body,
+        title,
+        merge_wrapped=profile == "export",
+        allow_notion_fence_tab=True,
+    )
     # A matching title token is optional only on the Notion side.
     if expected_structure and expected_structure[0] == ("title", _title_key(title)) and (not actual_structure or actual_structure[0] != expected_structure[0]):
         expected_structure = expected_structure[1:]
