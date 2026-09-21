@@ -1,9 +1,10 @@
 import hashlib, json
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
-from jev_skill_advisor.release import ReleaseError, ReleaseStore
+from jev_skill_advisor.release import ReleaseError, ReleaseStore, build_shadow_release
 
 
 def write_json(path, value):
@@ -90,3 +91,21 @@ def test_profile_resolution_uses_harness_then_generic_and_rejects_mismatch(tmp_p
     raw = json.loads(profiles["codex"].read_text()); raw["harness"] = "wrong"; profiles["codex"].write_text(json.dumps(raw))
     with pytest.raises(ReleaseError, match="release_file_tampered"):
         store.resolve_profile(host="h", harness="codex", session_id="c")
+
+
+def test_shadow_release_has_full_profile_coverage_and_is_repeatable(tmp_path):
+    snapshot = tmp_path / "snapshot"; skill = snapshot / "alpha" / "SKILL.md"
+    skill.parent.mkdir(parents=True); skill.write_text("---\nname: alpha\ndescription: alpha procedure\n---\n")
+    evidence = write_json(tmp_path / "parity.json", {"count": 1})
+    first, manifest = build_shadow_release(root=tmp_path / "state", snapshot_id="s", snapshot_root=snapshot,
+                                            evidence={"parity": evidence}, revision="abc")
+    second, repeated = build_shadow_release(root=tmp_path / "state", snapshot_id="s", snapshot_root=snapshot,
+                                             evidence={"parity": evidence}, revision="abc")
+    assert first == second
+    assert manifest == repeated
+    assert manifest["skill_count"] == 1
+    assert manifest["profiles"] == ["codex", "generic", "hermes"]
+    for harness in manifest["profiles"]:
+        profile = json.loads(Path(manifest["files"][f"profile:{harness}"]["path"]).read_text())
+        assert profile["mode"] == "shadow" and profile["read_enabled"] is False
+        assert profile["eligible_ids"] == ["warehouse:alpha"]

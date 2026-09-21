@@ -157,3 +157,45 @@ class ReleaseStore:
         if profile.harness != selected:
             raise ReleaseError("release_profile_harness_mismatch")
         return release_id, manifest, profile
+
+
+def build_shadow_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
+                         evidence: dict[str, Path], revision: str,
+                         harnesses=("codex", "hermes", "generic")) -> tuple[str, dict]:
+    """Build a deterministic, read-disabled release without activating it."""
+    from .catalog_cli import build_catalog
+    from .production_cli import atomic_json
+    from .profile import load_profile
+
+    root = Path(root).resolve(); snapshot_root = Path(snapshot_root).resolve()
+    catalog = build_catalog(snapshot_root)
+    stable_ids = sorted(row["stable_id"] for row in catalog["entries"])
+    seed = {"snapshot_id": snapshot_id, "catalog_hash": catalog["catalog_hash"],
+            "revision": revision, "harnesses": sorted(harnesses),
+            "evidence": {name: _digest(Path(path)) for name, path in sorted(evidence.items())}}
+    input_id = hashlib.sha256(_canonical(seed)).hexdigest()
+    inputs = root / "release-inputs" / input_id
+    inputs.mkdir(parents=True, exist_ok=True)
+    catalog_path = inputs / "catalog.json"
+    if catalog_path.exists() and json.loads(catalog_path.read_text()) != catalog:
+        raise ReleaseError("immutable_release_input_conflict")
+    atomic_json(catalog_path, catalog)
+    profiles = {}
+    for harness in sorted(harnesses):
+        path = inputs / f"profile-{harness}.json"
+        value = {"config_version": 1, "profile_id": f"{harness}-{input_id[:12]}", "harness": harness,
+                 "warehouse_root": str(snapshot_root), "catalog_path": str(catalog_path),
+                 "state_dir": str(root / "runtime" / harness), "mode": "shadow",
+                 "provider_enabled": True, "read_enabled": False, "eligible_ids": stable_ids,
+                 "read_allowlist": [], "credential_env": "TYPESAFE_API_KEY", "deadline_s": 5,
+                 "max_calls": 32, "max_tokens": 200000, "receipt_ttl_s": 86400,
+                 "prompt_limit": 20, "provider_attempt_limit": 160}
+        if path.exists() and json.loads(path.read_text()) != value:
+            raise ReleaseError("immutable_release_input_conflict")
+        atomic_json(path, value); profiles[harness] = path
+        profile = load_profile(path)
+        if len(profile.entries) != len(stable_ids):
+            raise ReleaseError("profile_catalog_coverage_mismatch")
+    release_id = ReleaseStore(root).create(snapshot_id=snapshot_id, snapshot_root=snapshot_root,
+        catalog_path=catalog_path, profiles=profiles, evidence=evidence, revision=revision)
+    return release_id, ReleaseStore(root).validate(release_id)
