@@ -1,0 +1,146 @@
+"""Immutable releases, atomic activation, and sticky per-session resolution."""
+from __future__ import annotations
+
+from contextlib import contextmanager
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import sqlite3
+import tempfile
+import time
+
+
+class ReleaseError(ValueError):
+    pass
+
+
+def _digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _canonical(value) -> bytes:
+    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def _atomic(path: Path, value) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False) as handle:
+        temporary = Path(handle.name)
+        handle.write(_canonical(value)); handle.flush(); os.fsync(handle.fileno())
+    try:
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+class ReleaseStore:
+    def __init__(self, root: Path):
+        self.root = Path(root).expanduser().resolve()
+        self.releases = self.root / "releases"
+        self.pointer = self.root / "current-release.json"
+        self.lock = self.root / ".release.lock"
+        self.db = self.root / "session-pins.sqlite3"
+        self.root.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.root, 0o700)
+        self.releases.mkdir(exist_ok=True)
+        with self._connect() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS pins(host TEXT, harness TEXT, session_id TEXT, release_id TEXT, created_at REAL, PRIMARY KEY(host,harness,session_id))")
+
+    def _connect(self):
+        db = sqlite3.connect(self.db, timeout=5, isolation_level=None)
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA journal_mode=WAL")
+        return db
+
+    @contextmanager
+    def _locked(self):
+        self.lock.touch(mode=0o600, exist_ok=True)
+        with self.lock.open("r+") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+    def create(self, *, snapshot_id: str, snapshot_root: Path, catalog_path: Path,
+               profiles: dict[str, Path], evidence: dict[str, Path], revision: str) -> str:
+        snapshot_root = Path(snapshot_root).resolve(); catalog_path = Path(catalog_path).resolve()
+        files = {"catalog": {"path": str(catalog_path), "sha256": _digest(catalog_path)}}
+        files.update({f"profile:{name}": {"path": str(Path(path).resolve()), "sha256": _digest(Path(path))}
+                      for name, path in sorted(profiles.items())})
+        files.update({f"evidence:{name}": {"path": str(Path(path).resolve()), "sha256": _digest(Path(path))}
+                      for name, path in sorted(evidence.items())})
+        catalog = json.loads(catalog_path.read_text())
+        ids = sorted(row["stable_id"] for row in catalog.get("entries", []))
+        manifest = {"schema_version": 1, "snapshot_id": snapshot_id, "snapshot_root": str(snapshot_root),
+                    "catalog_hash": files["catalog"]["sha256"], "skill_count": len(ids),
+                    "stable_ids_hash": hashlib.sha256(_canonical(ids)).hexdigest(),
+                    "profiles": sorted(profiles), "files": files, "implementation_revision": revision}
+        release_id = hashlib.sha256(_canonical(manifest)).hexdigest()
+        destination = self.releases / release_id
+        with self._locked():
+            if destination.exists():
+                self.validate(release_id)
+                return release_id
+            destination.mkdir(mode=0o700)
+            _atomic(destination / "manifest.json", manifest)
+        self.validate(release_id)
+        return release_id
+
+    def validate(self, release_id: str) -> dict:
+        if not isinstance(release_id, str) or len(release_id) != 64 or any(c not in "0123456789abcdef" for c in release_id):
+            raise ReleaseError("invalid_release_id")
+        path = self.releases / release_id / "manifest.json"
+        try:
+            manifest = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ReleaseError("missing_or_invalid_release") from exc
+        if hashlib.sha256(_canonical(manifest)).hexdigest() != release_id:
+            raise ReleaseError("release_manifest_tampered")
+        for item in manifest.get("files", {}).values():
+            candidate = Path(item["path"])
+            if not candidate.is_file() or _digest(candidate) != item["sha256"]:
+                raise ReleaseError("release_file_tampered")
+        if not Path(manifest["snapshot_root"]).is_dir():
+            raise ReleaseError("release_snapshot_missing")
+        return manifest
+
+    def current(self) -> str | None:
+        if not self.pointer.exists():
+            return None
+        try:
+            value = json.loads(self.pointer.read_text())
+            release_id = value["release_id"]
+        except (OSError, KeyError, json.JSONDecodeError) as exc:
+            raise ReleaseError("invalid_current_pointer") from exc
+        self.validate(release_id)
+        return release_id
+
+    def activate(self, release_id: str, *, expected_previous: str | None) -> None:
+        self.validate(release_id)
+        with self._locked():
+            actual = self.current()
+            if actual != expected_previous:
+                raise ReleaseError("current_release_changed")
+            _atomic(self.pointer, {"schema_version": 1, "release_id": release_id})
+
+    def resolve(self, *, host: str, harness: str, session_id: str) -> tuple[str, dict]:
+        if not all(isinstance(v, str) and v for v in (host, harness, session_id)):
+            raise ReleaseError("invalid_session_identity")
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT release_id FROM pins WHERE host=? AND harness=? AND session_id=?",
+                             (host, harness, session_id)).fetchone()
+            if row is None:
+                release_id = self.current()
+                if release_id is None:
+                    db.execute("ROLLBACK")
+                    raise ReleaseError("no_current_release")
+                db.execute("INSERT INTO pins VALUES(?,?,?,?,?)", (host, harness, session_id, release_id, time.time()))
+            else:
+                release_id = row["release_id"]
+            db.execute("COMMIT")
+        # Never silently repin when a retained release is damaged or missing.
+        return release_id, self.validate(release_id)
