@@ -1,6 +1,12 @@
 # Try it safely
 
-These steps prove transport and logging in shadow mode. They do not enable automatic skill injection.
+The live command, once a snapshot release is active, is:
+
+```bash
+skill-search --select --task "the task in one sentence" --json
+```
+
+That returns one verified skill or `selected: null`. The steps below prove the older shadow transport and logging. They do not enable automatic skill injection. Wiring for Codex, Hermes, Cursor, and Pi is in the [how-to](guide/how-to.md) and [harness integration](references/harness-integration.md).
 
 1. Install from this directory: `uv sync --extra mcp`.
 2. Build a host-local catalog, then copy `examples/service-host.example.json` to a host-local configuration path. Point it at that catalog and the same canonical warehouse. Replace `warehouse:example` with a real stable ID in both the profile and sample request. Keep `mode` as `shadow`, `read_enabled` false, and `read_allowlist` empty.

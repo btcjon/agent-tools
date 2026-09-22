@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Search only the host's active verified skill distribution."""
+"""Score the active snapshot catalog by words. This is a lookup, not delivery.
+
+A new task uses `skill-advisor-select` or `skill-search --select`.
+"""
 from __future__ import annotations
 
 import argparse

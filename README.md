@@ -26,11 +26,11 @@ Search the Skills Hub from recent work patterns, inspect the real candidates, an
 
 ### [Jev Skill Advisor](skills/discovery/jev-skill-advisor/)
 
-![Jev narrows a huge skill catalog to one verified recommendation](skills/discovery/jev-skill-advisor/assets/hero.webp)
+![A wall of skills collapses through a prism into one card](skills/discovery/jev-skill-advisor/assets/hero.webp)
 
-Select the relevant skill from a large canonical catalog without loading the whole warehouse into the main model's context.
+One Notion shelf. Any harness. Jev picks in one pass, and the prompt never sees the wall.
 
-**Best for:** harness builders who want bounded, measurable, advisory skill routing.
+**Best for:** a skill library you want in one place, without paying the context window to keep it there. See [what you get](skills/discovery/jev-skill-advisor/guide/).
 
 ### [Gmail Triage](skills/email/gmail-triage/)
 

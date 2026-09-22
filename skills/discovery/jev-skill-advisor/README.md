@@ -1,47 +1,49 @@
 # Jev Skill Advisor
 
-![Jev narrows a huge skill catalog to one verified recommendation](assets/hero.webp)
+![A wall of skills collapses through a prism into one card](assets/hero.webp)
 
-## Give the model the right skill—not the whole warehouse.
+## One shelf. Any harness. No catalog in the prompt.
 
-Jev Skill Advisor searches a canonical skill catalog and recommends the small, relevant slice a harness should consider for the current request.
+Put every skill in one Notion library. Point Codex, Hermes, or the next harness at that same shelf. Jev reads the task and returns one skill in a single pass. The other six hundred never enter the context window.
 
-That keeps giant catalogs out of the main model context while preserving the boundary that matters: **Jev advises; your harness decides and executes.**
+That is the trade the old setup could not make. The symlink farm was either loaded, and expensive, or left on disk, and invisible. Here the library stays whole, the pick stays fast, and the prompt stays small.
+
+Jev chooses. Your harness checks the card. A skill you named by hand always wins.
+
+The payoff and the day-to-day checks are in the [guide](guide/README.md).
 
 ## What you get
 
-- **Less context drag:** scan large catalogs in bounded batches instead of injecting every skill.
-- **One portable contract:** the same `suggest`, `read`, and `report_outcome` flow through Python, JSON stdin/stdout, or optional MCP.
-- **Tamper-aware reads:** stable IDs and source/policy hashes bind a recommendation to the skill that was actually cataloged.
-- **Local evidence:** outcomes live in host-local SQLite so advisory quality can be measured.
-- **No authority leak:** Jev cannot run skills, grant permissions, or override an explicit user choice.
+- **One place for the whole library:** Notion's Agent Skills API is the shelf. Search **Jev Skills Pilot**. Stop copying skill folders from machine to machine.
+- **Harness agnostic:** Codex and Hermes already read the same verified copy. Another harness uses the same Python, JSON, or MCP door.
+- **Jev's speed, not another model loop:** Jev chooses from the whole eligible catalog inside one call. It does not write an essay about which skill to open, and it does not spend a dozen turns searching.
+- **No context-window bill:** the catalog stays out. The task receives one skill body. In the activation checks, that body ran from a few kilobytes to about 16 KB.
+- **A card that still matches the shelf:** the body is checked against the catalog before it lands in the prompt. A mismatch adds nothing.
+- **A receipt, not a transcript:** the log records which skill, how long, and how many bytes. It leaves the prompt and the skill body out.
+- **No extra keys:** Jev cannot run a skill, grant a permission, or overrule a skill you named.
 
 ## How it works
 
-1. **Catalog:** inventory `SKILL.md` files or verified Notion skill packages and record stable IDs plus source, package, and policy hashes.
-2. **Suggest:** rank only skills the calling harness says are available.
-3. **Read and report:** permit the selected hash-bound read, then record the outcome for evaluation.
+1. **Publish.** Each skill becomes one Notion row: name, description, and a portable package in Files. The page body is the skill instructions. The Agent Skills API caps Files at 100 uploads and a plugin export at 100 skills, so each package travels as one bundle plus a manifest, and plugins are split into shards of 80.
+2. **Snapshot.** Harnesses do not call Notion on each task. A rebuild promotes one verified snapshot. A failed rebuild leaves the previous snapshot in place.
+3. **Choose.** `skill-search --select` asks Jev to pick one eligible skill, or none. A name you give skips Jev and still checks the snapshot hash.
+4. **Deliver.** The harness checks that body against the snapshot and adds it. A timeout, a bad hash, or a missing credential adds nothing, and the task continues.
 
-It is a metal detector for your skill library—not a robot with the keys to the vault.
+It is a card catalog that puts one book on the desk. It is not a librarian with the keys to the building.
 
 ## Try it
 
+With a snapshot already active and `TYPESAFE_API_KEY` available outside the repo:
+
 ```bash
-cd skills/discovery/jev-skill-advisor
-uv run --with-editable . skill-advisor-catalog \
-  --warehouse /path/to/skills/exported \
-  --output /host/state/catalog-v1.json
-uv run --with-editable . skill-advisor-admin \
-  --config /path/to/profile.json init-db
-uv run --with-editable . skill-advisor-service \
-  --config /path/to/profile.json suggest < request.json
+skill-search --select --task "the task in one sentence" --json
 ```
 
-Start with [`TRY_IT.md`](TRY_IT.md). For harness wiring, read [`references/harness-integration.md`](references/harness-integration.md).
+A result has one `selected` object, including the skill id, snapshot id, content hash, and body. `selected: null` adds nothing. Setup, per-harness wiring, and the day-to-day checks are in the [guide](guide/README.md). The command contract is in [`references/harness-integration.md`](references/harness-integration.md).
 
 ## Safe operating boundary
 
-Keep credentials, catalogs, prompts, transcripts, skill bodies, and `advisor.sqlite3` outside Git and synchronized folders. Begin in shadow mode. Confidence is advice—not permission, proof, or correctness.
+Keep credentials, catalogs, prompts, transcripts, skill bodies, and `advisor.sqlite3` outside Git and synchronized folders. A fresh install stays in shadow until you turn delivery on. A confident pick is still only a suggestion.
 
 ## Test it
 

@@ -7,7 +7,6 @@ import json
 import os
 from pathlib import Path
 import re
-import signal
 import socket
 import subprocess
 import sys
@@ -42,20 +41,55 @@ def _explicit(prompt):
     return sorted({item.rstrip(".,;!?") for item in re.findall(r"(?<![\w-])\$([A-Za-z0-9][A-Za-z0-9_.:-]*)",prompt)})[:5]
 
 
+def _shape(selected):
+    path = Path(selected["path"])
+    return {
+        "id": selected["skill_id"],
+        "body": selected["content"],
+        "content_hash": selected["hash"],
+        "canonical_path": str(path),
+        "package_root": str(selected.get("package_root") or path.parent),
+    }
+
+
 def _run(request, source, timeout):
-    if isinstance(source, dict):
-        arguments = ["--release-root", str(source["release_root"]), "--host", source["host"]]
+    from .select_cli import select_named, select_task
+    profile_path = None if isinstance(source, dict) else Path(source)
+    names = [name for name in (request.get("explicit_skills") or []) if isinstance(name, str) and name]
+    chosen = []
+    reason = None
+    attempts = 0
+    status = "explicit_selection" if names else "suggested"
+    if names:
+        for name in names[:5]:
+            result = select_named(name, profile_path=profile_path)
+            reason = result.get("reason")
+            selected = result.get("selected")
+            if isinstance(selected, dict):
+                chosen.append(selected)
     else:
-        arguments = ["--config", str(source)]
-    process=subprocess.Popen([sys.executable,"-m","jev_skill_advisor.service_cli",*arguments,"prepare-context"],
-        stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
-    try: stdout,_=process.communicate(json.dumps(request).encode(),timeout=timeout)
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid,signal.SIGKILL); process.wait(); raise
-    if process.returncode or len(stdout)>131072: raise ValueError("service_failure")
-    value=json.loads(stdout)
-    if not isinstance(value,dict): raise ValueError("malformed_response")
-    return value
+        result = select_task(
+            str(request.get("task") or ""),
+            profile_path=profile_path,
+            deadline_s=min(12.0, max(0.5, float(timeout))),
+        )
+        reason = result.get("reason")
+        attempts = result.get("attempts") or 0
+        selected = result.get("selected")
+        if isinstance(selected, dict):
+            chosen.append(selected)
+    skills = [_shape(item) for item in chosen]
+    if not skills:
+        status = "none"
+    return {
+        "status": status,
+        "receipt_id": "catalog-select",
+        "selected_ids": [item["id"] for item in skills],
+        "telemetry": {"provider_attempts": attempts},
+        "skills": skills,
+        "reason": reason,
+        "fallback": reason,
+    }
 
 
 def _context(result, bindings):
@@ -140,7 +174,7 @@ def main():
     configured=os.environ.get("JEV_CODEX_PROFILE")
     output=handle_event(event,profile=Path(configured) if configured else None,
         release_root=Path(os.environ.get("JEV_RELEASE_ROOT",DEFAULT_RELEASE_ROOT)),
-        state=Path(os.environ.get("JEV_CODEX_STATE",DEFAULT_STATE)))
+        state=Path(os.environ.get("JEV_CODEX_STATE",DEFAULT_STATE)), timeout=14)
     sys.stdout.write(json.dumps(output,separators=(",",":")) if output else "")
     return 0
 
