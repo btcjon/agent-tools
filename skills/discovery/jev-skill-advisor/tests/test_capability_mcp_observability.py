@@ -60,6 +60,16 @@ def _body(result):
 
 @unittest.skipIf(Client is None, "optional mcp dependency not installed")
 class CapabilityTelemetryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_model_facing_protocol_version_is_integer_one(self):
+        async with Client(self._server(), raise_exceptions=True) as client:
+            tools = (await client.list_tools()).tools
+        for tool in tools:
+            if tool.name not in {"capability_describe", "notion-fetch"}:
+                continue
+            field = tool.input_schema["properties"]["protocol_version"]
+            self.assertEqual(field.get("const"), 1, tool.name)
+            self.assertEqual(field.get("type"), "integer", tool.name)
+
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addAsyncCleanup(self.tmp.cleanup)

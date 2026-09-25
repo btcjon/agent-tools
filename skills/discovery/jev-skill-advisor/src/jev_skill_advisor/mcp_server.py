@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import time
 from pathlib import Path
+from typing import Literal
 from .profile import load_profile
 from .service import SkillAdvisorService
 from .release import ReleaseStore
@@ -190,7 +191,7 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
 
     if manifest is not None:
         @server.tool()
-        def capability_describe(protocol_version: object, session_id: str, receipt_id: str, capability_id: str) -> dict:
+        def capability_describe(protocol_version: Literal[1], session_id: str, receipt_id: str, capability_id: str) -> dict:
             if protocol_version != 1 or isinstance(protocol_version, bool):
                 raise ValueError("invalid_protocol_version")
             if not all(isinstance(item, str) for item in (session_id, receipt_id, capability_id)):
@@ -208,7 +209,7 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
 
     if manifest is not None and notion_bridge is not None:
         @server.tool(name="notion-fetch", description="Read one Notion page by id when the stored receipt authorizes notion-fetch.")
-        def notion_fetch(protocol_version: object, session_id: str, receipt_id: str, page_id: str) -> dict:
+        def notion_fetch(protocol_version: Literal[1], session_id: str, receipt_id: str, page_id: str) -> dict:
             if protocol_version != 1 or isinstance(protocol_version, bool):
                 raise ValueError("invalid_protocol_version")
             if not all(isinstance(item, str) for item in (session_id, receipt_id, page_id)):
