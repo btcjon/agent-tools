@@ -28,6 +28,8 @@ def main() -> int:
     from tools.mcp_tool_discovery import register_mcp_servers
     from tools.mcp_tool_lifecycle import shutdown_mcp_servers
     from tools.registry import registry
+    from tools.tool_search import assemble_tool_defs, load_config_readonly
+    from hermes_cli.prompt_size import compute_prompt_breakdown
 
     configured = _get_mcp_servers()
     notion = configured.get("notion") if isinstance(configured, dict) else None
@@ -46,6 +48,8 @@ def main() -> int:
         selected = {name for name in names if name.startswith("mcp__jev_skill_advisor__")}
         native_definitions = registry.get_definitions(set(native), quiet=True)
         bridge_definitions = registry.get_definitions(selected, quiet=True)
+        assembled = assemble_tool_defs(native_definitions + bridge_definitions, config=load_config_readonly())
+        inspected = compute_prompt_breakdown("cli")
         expected_native = bool(native) if args.native_visible else not native
         outcome = {
             "status": "baseline_in_process" if args.native_visible and expected_native and selected == EXPECTED_BRIDGE_NAMES else (
@@ -55,6 +59,13 @@ def main() -> int:
             "model_registry_bridge_count": len(selected),
             "native_registry_schema_bytes": len(json.dumps(native_definitions, separators=(",", ":")).encode()) if native_definitions else 0,
             "bridge_registry_schema_bytes": len(json.dumps(bridge_definitions, separators=(",", ":")).encode()) if bridge_definitions else 0,
+            "mcp_only_assembled_schema_bytes": len(json.dumps(assembled.tool_defs, separators=(",", ":")).encode()),
+            "mcp_only_assembled_tool_count": len(assembled.tool_defs),
+            "mcp_only_deferred_count": assembled.deferred_count,
+            "mcp_only_listing_form": assembled.listing_form,
+            "offline_agent_system_prompt_bytes": inspected["system_prompt"]["bytes"],
+            "offline_agent_tool_schema_bytes": inspected["tools"]["json_bytes"],
+            "offline_agent_tool_count": inspected["tools"]["count"],
             "registered_bridge_names": sorted(selected),
             "agent_turn_tested": False,
             "provider_request_captured": False,
