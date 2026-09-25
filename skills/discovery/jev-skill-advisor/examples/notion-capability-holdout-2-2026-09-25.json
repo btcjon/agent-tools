@@ -1,0 +1,630 @@
+{
+  "schema_version": 1,
+  "frozen_before_outcomes": true,
+  "provenance": "Independent holdout authored 2026-09-25 before any selector or provider run. Sources: the 45-entry live manifest examples/notion-mcp-live-manifest-2026-09-24.json, Notion supported tools at https://developers.notion.com/guides/mcp/mcp-supported-tools (fetched 2026-09-25), and the Notion Skills MCP guide. Not derived from prior capability-eval cases, holdouts, scored reports, Opus packets, or candidate curated cards.",
+  "manifest_ref": "examples/notion-mcp-live-manifest-2026-09-24.json",
+  "cases": [
+    {
+      "id": "h2-open-known-page",
+      "task": "Open this Notion page and quote the requirements section back to me: https://www.notion.so/Launch-requirements-9f2c1a. Leave the page unchanged.",
+      "acceptable_ids": [
+        "notion.mcp.fetch"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "read",
+        "paraphrase"
+      ],
+      "rationale": "Manifest fetch retrieves a page, database, data source, or view by URL or ID. The user wants existing requirements text in the reply. A workspace search is a near miss because the URL is already known. Official fetch docs cover page URLs. This does not edit the page."
+    },
+    {
+      "id": "h2-view-settings-only",
+      "task": "How is the saved view view://8ac3f3d0-1f2b-4c7e-9d51-4b0c0a9f2e77 filtered and sorted? I want those settings, not the rows themselves.",
+      "acceptable_ids": [
+        "notion.mcp.fetch"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "read",
+        "paraphrase"
+      ],
+      "rationale": "Official fetch docs say a view:// URL returns that saved view's filters, sorts, and display settings. Running the view to list rows is the query tool's view mode, which is the near miss. Reading settings does not create or edit a view."
+    },
+    {
+      "id": "h2-budget-mentions",
+      "task": "Which pages in this Notion workspace mention the budget approval process? Titles and links are enough. Do not change anything.",
+      "acceptable_ids": [
+        "notion.mcp.search",
+        "notion.mcp.ai-search"
+      ],
+      "accept": "any",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "read",
+        "search",
+        "paraphrase"
+      ],
+      "rationale": "Official search routing uses AI content search when that access status is available, including exact keywords, and workspace search otherwise. Either operation answers a Notion-only phrase lookup. Sidebar recents are a near miss because no phrase is involved. Connected-source coverage is not requested, and neither operation writes."
+    },
+    {
+      "id": "h2-connected-launch",
+      "task": "What have connected Slack and Mail been saying about the mobile launch? Summarize those outside sources. Do not edit Notion.",
+      "acceptable_ids": [
+        "notion.mcp.ai-search"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "plan_may_block",
+      "spans": [
+        "read",
+        "search",
+        "plan_gate",
+        "paraphrase"
+      ],
+      "rationale": "Official AI search covers connected Slack and Mail only when those sources are connected and Notion AI is available. Without that access the call can fall back to Notion-only results with a notice, so the requested sources may be missing. Plain workspace search is the near miss. This does not write, and success is not guaranteed."
+    },
+    {
+      "id": "h2-signed-in-user",
+      "task": "Who is the signed-in Notion user on this connection? I need that person's name, email, and user id, not the rest of the directory.",
+      "acceptable_ids": [
+        "notion.mcp.get-users"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "read",
+        "paraphrase"
+      ],
+      "rationale": "Official get-users can retrieve the current user, including name and email when Notion provides them. Content search and the teamspace list are near misses; they do not return the signed-in user record. This is a directory read, not an invite or permission change."
+    },
+    {
+      "id": "h2-teamspace-roster",
+      "task": "Which teamspaces exist in this Notion workspace, and am I a member of each? Names, ids, and roles are enough.",
+      "acceptable_ids": [
+        "notion.mcp.get-teams"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "read"
+      ],
+      "rationale": "Manifest and official get-teams list teamspaces with membership, ids, names, and roles. The user directory is a near miss because teamspaces are not people. The tool does not create or rename a teamspace."
+    },
+    {
+      "id": "h2-sidebar-pins",
+      "task": "What have I pinned in the Notion sidebar? Give the favorites in the same order they appear there.",
+      "acceptable_ids": [
+        "notion.mcp.list-favorite-pages"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "read",
+        "paraphrase"
+      ],
+      "rationale": "Manifest list-favorite-pages returns the current user's favorite pages and databases in sidebar order. A content search is a near miss; pins are not a keyword match. The public tool guide does not describe this list. Nothing is written."
+    },
+    {
+      "id": "h2-private-top",
+      "task": "Show the top-level pages and databases in my Private sidebar. Do not open their contents.",
+      "acceptable_ids": [
+        "notion.mcp.list-private-pages"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "read"
+      ],
+      "rationale": "Manifest list-private-pages browses the current user's top-level Private sidebar items and says content searches belong elsewhere. Shared-sidebar listing is a near miss. The public guide does not document this list. No page body is required and nothing is written."
+    },
+    {
+      "id": "h2-shared-sidebar",
+      "task": "What pages and databases are in my Shared sidebar, the ones shared directly with me? Titles only.",
+      "acceptable_ids": [
+        "notion.mcp.list-shared-pages"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "read",
+        "paraphrase"
+      ],
+      "rationale": "Manifest list-shared-pages lists pages and databases in the Shared sidebar. The private-sidebar list and a workspace content search are near misses. The public guide does not document this list. This is a structure read, not a permission change."
+    },
+    {
+      "id": "h2-just-closed",
+      "task": "I closed a Notion page a few minutes ago and forgot its title. What have I opened recently, most recent first?",
+      "acceptable_ids": [
+        "notion.mcp.list-recent-pages"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "read",
+        "paraphrase"
+      ],
+      "rationale": "Manifest list-recent-pages ranks pages and databases the current user recently viewed by recency and visit frequency. Keyword search is a near miss when no title or phrase is known. The public guide does not document this list. Nothing is created."
+    },
+    {
+      "id": "h2-access-before-lookup",
+      "task": "Before any lookup, can this Notion connection use the smarter content search, and which parameters does the plan block?",
+      "acceptable_ids": [
+        "notion.mcp.get-tool-access"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "read",
+        "plan_gate",
+        "paraphrase"
+      ],
+      "rationale": "Official get-tool-access returns the connection access map, including whether AI search is available and which parameters are restricted. It reads metadata and does not grant access or change the workspace. Running a search would answer a different question."
+    },
+    {
+      "id": "h2-existing-threads",
+      "task": "Show the comments and discussion threads already on the quarterly review page, including resolved ones. Do not add a comment.",
+      "acceptable_ids": [
+        "notion.mcp.get-comments"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "read",
+        "comment",
+        "paraphrase"
+      ],
+      "rationale": "Official get-comments lists discussions and can include resolved threads and full comment text. Adding a comment is the write near miss and is excluded. Fetching the page body does not return the discussion listing this tool describes."
+    },
+    {
+      "id": "h2-markdown-attachment",
+      "task": "Read back the text of the Markdown attachment we just stored. Its file upload id is upload_8c2a. I need the attachment text, not the surrounding page.",
+      "acceptable_ids": [
+        "notion.mcp.download-attachment"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "read",
+        "attachment"
+      ],
+      "rationale": "Official download-attachment returns UTF-8 text, including Markdown, for an attachment from the attachment tool, using the file upload id, up to about 200 KiB. Fetching the page is a near miss and does not download that text. This does not store a new file."
+    },
+    {
+      "id": "h2-skill-bundle",
+      "task": "Download the complete skill bundle, supporting files included, for skill page 6b1e0a2c-77d4-4e1a-9c33-0aa1b2c3d4e5. A page preview is not enough.",
+      "acceptable_ids": [
+        "notion.mcp.download-skill"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "plan_may_block",
+      "spans": [
+        "read",
+        "plan_gate"
+      ],
+      "rationale": "The skills guide says download-skill returns a signed archive of SKILL.md plus supporting files. It requires the Skills API and is unavailable in eval mode and on workspace-owned connections, so this may not run. Fetching the page is the near miss when only the page body is needed."
+    },
+    {
+      "id": "h2-weekly-update-skill",
+      "task": "Find the reusable Notion skill I use for a weekly project update. I remember the job, not the page link.",
+      "acceptable_ids": [
+        "notion.mcp.search-skills"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "read",
+        "search",
+        "paraphrase"
+      ],
+      "rationale": "Official search-skills finds active skills by a short task description and returns metadata to fetch later. A general workspace content search is a near miss, and downloading the archive waits until a skill page id is known. The skills guide does not state a paid-plan block for this lookup."
+    },
+    {
+      "id": "h2-specs-in-progress",
+      "task": "From the Specs data source, read the in-progress rows and keep person mentions and links in Notes intact. Do not change any row.",
+      "acceptable_ids": [
+        "notion.mcp.query-data-sources"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "plan_may_block",
+      "spans": [
+        "read",
+        "query",
+        "plan_gate"
+      ],
+      "rationale": "Official query-data-sources rows mode keeps rich-text mentions and links that SQL text can drop. Rows mode shares the single-source SQL allowance: unlimited on Business or Enterprise with Notion AI, and metered elsewhere until an upgrade prompt. A saved-view run is a near miss. Do not assume the allowance remains."
+    },
+    {
+      "id": "h2-run-in-progress-view",
+      "task": "Run the existing In Progress view on the task database and list the rows it already shows. Do not create another view.",
+      "acceptable_ids": [
+        "notion.mcp.query-data-sources"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "read",
+        "query",
+        "paraphrase"
+      ],
+      "rationale": "Official query-data-sources view mode runs a saved view and is available on every plan without a tool-specific quota. Creating or editing a view would change the database. Fetching the view URL would return settings, not the rows."
+    },
+    {
+      "id": "h2-meetings-this-week",
+      "task": "Show my meeting notes from this week where I was an attendee, including sprint-planning action items. Filter that meeting-notes source rather than every page.",
+      "acceptable_ids": [
+        "notion.mcp.query-meeting-notes"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "plan_may_block",
+      "spans": [
+        "read",
+        "query",
+        "plan_gate",
+        "paraphrase"
+      ],
+      "rationale": "Official query-meeting-notes filters the current user's meeting-notes source and defaults to meetings they attend or created. The guide says it needs Business or higher with Notion AI and otherwise returns an upgrade prompt, so it may not run. Workspace search is the near miss."
+    },
+    {
+      "id": "h2-risks-across-sources",
+      "task": "With read-only SQL, compare open risks in the Engineering database and the Product database, grouped by owner. One saved view is not enough.",
+      "acceptable_ids": [
+        "notion.mcp.query-data-sources",
+        "notion.mcp.query-multiple-data-sources"
+      ],
+      "accept": "any",
+      "safety": "read",
+      "account_execution": "plan_may_block",
+      "spans": [
+        "read",
+        "query",
+        "plan_gate"
+      ],
+      "rationale": "Official query-data-sources documents SQL across data sources, unlimited on Business and Enterprise with Notion AI and upgrade-limited otherwise. The live manifest also has a separate read-only multi-source SQLite operation, so either comparison fits. A single saved view is a near miss. The upgrade-steps helper is not the query. Success is not guaranteed."
+    },
+    {
+      "id": "h2-support-agent-link",
+      "task": "Find the published custom agent named Support Agent and give me the link I would need before starting it. Do not start it.",
+      "acceptable_ids": [
+        "notion.mcp.search-agents"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "plan_may_block",
+      "spans": [
+        "read",
+        "search",
+        "plan_gate",
+        "paraphrase"
+      ],
+      "rationale": "Official search-agents finds a custom agent by name and returns the URL used to start a session. Starting a session would write and was excluded. Agent tools need Notion AI and Custom Agents access and otherwise return a recovery prompt, so the lookup may be blocked."
+    },
+    {
+      "id": "h2-launch-decision-sessions",
+      "task": "Search past custom-agent sessions for the launch decision and return the matching excerpts. Do not list every session.",
+      "acceptable_ids": [
+        "notion.mcp.search-sessions"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "plan_may_block",
+      "spans": [
+        "read",
+        "search",
+        "plan_gate",
+        "paraphrase"
+      ],
+      "rationale": "Official search-sessions searches a refreshed topic index and returns session URLs and excerpts. Listing or title-filtering sessions is the near miss, and the guide says the index can be missing or stale. Custom Agent access may block the call. This does not post into a session."
+    },
+    {
+      "id": "h2-copy-finished",
+      "task": "The page copy I started came back as async task task_abc123. Has that copy finished, and what was the result? Do not start another copy.",
+      "acceptable_ids": [
+        "notion.mcp.get-async-task"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "read"
+      ],
+      "rationale": "Official get-async-task reports queued, running, retrying, succeeded, or failed for a task from another tool, including duplication, and includes the result or error. Fetching a page or duplicating again are near misses. Checking status does not itself copy the page."
+    },
+    {
+      "id": "h2-page-and-threads",
+      "task": "Open https://www.notion.so/quarterly-review-44ab and show both the page body and the discussion threads already on it. Do not add a comment.",
+      "acceptable_ids": [
+        "notion.mcp.fetch",
+        "notion.mcp.get-comments"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "read",
+        "comment",
+        "multi",
+        "paraphrase"
+      ],
+      "rationale": "The URL makes fetch required for the body, and official get-comments is required for the threads. Both are reads; adding a comment would write and was excluded. Search is a near miss because the page URL is already known."
+    },
+    {
+      "id": "h2-full-connector-steps",
+      "task": "The multi-database analysis said we need the full connector. Show that upgrade guidance once, and do not query anything else.",
+      "acceptable_ids": [
+        "notion.mcp.show-advanced-analysis-next-steps"
+      ],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "plan_may_block",
+      "spans": [
+        "read",
+        "plan_gate",
+        "paraphrase"
+      ],
+      "rationale": "Manifest show-advanced-analysis-next-steps is one no-argument call when the multi-source query needs the full Notion MCP. It does not run SQL. A general access-map read is a near miss. The public guide does not document this helper. Showing it does not mean an upgrade exists or a later query will succeed."
+    },
+    {
+      "id": "h2-kickoff-under-projects",
+      "task": "Under the Projects page, add a kickoff page that contains a short agenda and the team list.",
+      "acceptable_ids": [
+        "notion.mcp.create-pages"
+      ],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": [
+        "write",
+        "paraphrase"
+      ],
+      "rationale": "Official create-pages creates one or more pages under a named parent with properties and content. A comment, an empty folder, or a new database would not produce that page. Permission or validation can still reject the write; the gold label is the create operation."
+    },
+    {
+      "id": "h2-status-complete",
+      "task": "The task page already exists. Switch its Status to Complete and do not rewrite the description.",
+      "acceptable_ids": [
+        "notion.mcp.update-page"
+      ],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": [
+        "write",
+        "paraphrase"
+      ],
+      "rationale": "Official update-page changes properties on an existing page, which covers Status, without requiring a body rewrite. Creating a new page is the near miss, and a comment would not change the property. The update can still fail validation or permissions."
+    },
+    {
+      "id": "h2-spacing-note",
+      "task": "Leave a note on the design proposal page that the spacing feels too tight. Keep the page body as it is.",
+      "acceptable_ids": [
+        "notion.mcp.create-comment"
+      ],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": [
+        "write",
+        "comment",
+        "paraphrase"
+      ],
+      "rationale": "Official create-comment adds a comment to a page while leaving page content unchanged. Updating the page body is the near miss the user ruled out. Reading existing threads would not add the note. The comment can still fail if the page is not editable."
+    },
+    {
+      "id": "h2-feedback-log",
+      "task": "Set up a fresh database where we can log customer feedback, with columns for who wrote it, what kind it is, how urgent it is, and whether it is open.",
+      "acceptable_ids": [
+        "notion.mcp.create-database"
+      ],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": [
+        "write",
+        "paraphrase"
+      ],
+      "rationale": "Official create-database creates a database, its initial data source, and an initial view with the requested properties. Adding a column to a database that already exists is the near miss. A single page cannot hold that schema. Creation can still fail for permissions."
+    },
+    {
+      "id": "h2-priority-column",
+      "task": "Add a Priority field to the existing task data source. Keep the current database; do not create another one.",
+      "acceptable_ids": [
+        "notion.mcp.update-data-source"
+      ],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": [
+        "write"
+      ],
+      "rationale": "Official update-data-source changes an existing data source's schema, including adding a property. Creating a new database is the near miss the user forbade. Updating one page's Status would not add a column. Schema edits can still be rejected."
+    },
+    {
+      "id": "h2-status-board",
+      "task": "On the existing tasks database, add a board grouped by Status. Do not change the database properties.",
+      "acceptable_ids": [
+        "notion.mcp.create-view"
+      ],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": [
+        "write",
+        "paraphrase"
+      ],
+      "rationale": "Official create-view adds a view, including a board grouped by a property, on an existing database. Renaming or refiltering a view that already exists is the near miss, and altering the data-source schema was excluded. A basic board is not documented as plan-blocked; permissions can still reject it."
+    },
+    {
+      "id": "h2-refile-weekly-notes",
+      "task": "Put the weekly notes page underneath the Team Meetings page. The notes themselves should stay the same.",
+      "acceptable_ids": [
+        "notion.mcp.move-pages"
+      ],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": [
+        "write",
+        "paraphrase"
+      ],
+      "rationale": "Official move-pages moves pages or databases to a new parent. Updating the page body or properties is a near miss and was not requested. Duplicating would leave the original in place. The move can still fail if the new parent is not accessible."
+    },
+    {
+      "id": "h2-empty-project-folder",
+      "task": "Under the current project page, add an empty folder named Project files. I do not want a new document inside it.",
+      "acceptable_ids": [
+        "notion.mcp.create-folder"
+      ],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": [
+        "write",
+        "paraphrase"
+      ],
+      "rationale": "Official create-folder creates an empty folder under a parent page. Creating a child page is the near miss because the user asked for a folder with no document inside. The manifest summary matches that empty-folder create. Parent permissions can still reject it."
+    },
+    {
+      "id": "h2-inline-csv",
+      "task": "Take this small CSV I am pasting and store it as a text attachment in Notion. Return the markdown snippet for later. Do not make a page.",
+      "acceptable_ids": [
+        "notion.mcp.create-attachment"
+      ],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": [
+        "write",
+        "attachment",
+        "paraphrase"
+      ],
+      "rationale": "Official create-attachment stores one inline UTF-8 text source, including CSV, up to about 200 KiB, and returns suggested markdown. A local-file upload URL is the near miss because the bytes are pasted text, not a file to POST. Creating a page was excluded. Oversized text can still fail."
+    },
+    {
+      "id": "h2-pdf-on-spec",
+      "task": "Upload the local file spec-appendix.pdf into Notion and place that file on the existing spec page https://www.notion.so/spec-12cd. Do not create a second page.",
+      "acceptable_ids": [
+        "notion.mcp.create-file-upload",
+        "notion.mcp.update-page"
+      ],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": [
+        "write",
+        "attachment",
+        "multi"
+      ],
+      "rationale": "Official create-file-upload returns a short-lived URL the client must POST, with a 20 MiB cap and workspace size limits. suggested markdown then goes to update-page to place the file on the existing page. An inline text attachment or a new page are near misses. These labels do not mean the upload will succeed."
+    },
+    {
+      "id": "h2-copy-then-report",
+      "task": "Make a copy of the meeting-agenda template page and tell me when that copy has finished. Do not edit the original.",
+      "acceptable_ids": [
+        "notion.mcp.duplicate-page",
+        "notion.mcp.get-async-task"
+      ],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": [
+        "write",
+        "multi",
+        "paraphrase"
+      ],
+      "rationale": "Official duplicate-page copies a page asynchronously, and get-async-task reports whether that task succeeded or failed and includes the result. Creating a blank page is a near miss. Editing the original was excluded. The copy can still fail permissions or the async task; both operations are required to answer."
+    },
+    {
+      "id": "h2-guidelines-as-skill",
+      "task": "Make the existing engineering guidelines page a skill without changing its wording: https://www.notion.so/engineering-guidelines-77ab",
+      "acceptable_ids": [
+        "notion.mcp.convert-page-to-skill",
+        "notion.mcp.update-page"
+      ],
+      "accept": "any",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": [
+        "write",
+        "paraphrase"
+      ],
+      "rationale": "The skills guide gives two equivalent ways to flip the skill flag without rewriting content: convert the page using its URL, or update the page's skill flag and omit property and body changes. Creating a new skill page or uploading an archive would add different content. Edit permission can still block either call."
+    },
+    {
+      "id": "h2-start-support-agent",
+      "task": "Start the published custom agent named Support Agent on this customer issue. I do not have its link, and I do not want a follow-up message after it starts.",
+      "acceptable_ids": [
+        "notion.mcp.search-agents",
+        "notion.mcp.spawn-session"
+      ],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "plan_may_block",
+      "spans": [
+        "write",
+        "search",
+        "multi",
+        "plan_gate",
+        "paraphrase"
+      ],
+      "rationale": "Official custom-agent flow uses search-agents to get the agent URL, then spawn-session to start it. A follow-up message is a different write and was excluded. These tools need Notion AI and Custom Agents access and otherwise return a recovery prompt, so the start may be blocked."
+    },
+    {
+      "id": "h2-erase-roadmap",
+      "task": "Permanently delete the obsolete roadmap page and empty the trash so it cannot be restored.",
+      "acceptable_ids": [],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "null"
+      ],
+      "rationale": "The 45-entry manifest can move, duplicate, or update a page, but it has no delete or trash operation. The published update-page actions are properties, content, icon, cover, the skill flag, and templates, not deletion. No listed operation empties trash, so the acceptable set is empty."
+    },
+    {
+      "id": "h2-mail-the-pdf",
+      "task": "Email a PDF export of the roadmap page to ada@example.com from Notion. Sending the message is the whole request.",
+      "acceptable_ids": [],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "null",
+        "paraphrase"
+      ],
+      "rationale": "None of the 45 manifest operations sends email or exports a page to PDF. Fetching or searching the roadmap would only read it, and a file upload stores a file in Notion rather than mailing it. The requested send has no matching operation."
+    },
+    {
+      "id": "h2-guest-edit-access",
+      "task": "Invite guest ada@example.com and give them edit access on the roadmap page. Finding their profile is not enough.",
+      "acceptable_ids": [],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": [
+        "null",
+        "paraphrase"
+      ],
+      "rationale": "The user directory can list or look up a person, but no manifest operation invites a guest or changes page permissions. Comments, page updates, and moves do not grant access. Because the requested permission change has no tool, the acceptable set is empty."
+    }
+  ],
+  "manifest_hash": "2c7bc087503741cc43c28bc4cff479d3c083673627d2e03415e92e9e42cd9cac"
+}
