@@ -26,6 +26,26 @@ printf '%s\\n' '3.12.0 (test)' 'LIBPYTHON:'
 
 
 class FrozenBundleTests(unittest.TestCase):
+    def test_build_cli_requires_explicit_release(self):
+        with TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("freeze_bundle.py")),
+                 "build", "--repo", tmp, "--output-root", tmp, "--revision", REVISION],
+                capture_output=True, text=True, check=False,
+            )
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(json.loads(result.stdout), {"status": "refused", "reason": "build_inputs_missing"})
+
+    def test_build_cli_requires_explicit_revision(self):
+        with TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("freeze_bundle.py")),
+                 "build", "--repo", tmp, "--output-root", tmp, "--release", "a" * 64],
+                capture_output=True, text=True, check=False,
+            )
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(json.loads(result.stdout), {"status": "refused", "reason": "build_inputs_missing"})
+
     def test_clean_archive_ignores_worktree_content(self):
         with TemporaryDirectory() as tmp:
             repo = Path(__file__).resolve().parents[5]
@@ -100,13 +120,12 @@ class FrozenBundleTests(unittest.TestCase):
             root = Path(tmp)
             bundle = root / "bundle"
             subprocess.run([str(base), "-m", "venv", "--without-pip", str(bundle)], check=True, capture_output=True)
-            probe = ENTRYPOINT.replace(
-                '-m jev_skill_advisor.mcp_server "$@"',
-                "-c 'import os, sys; print(sys.prefix); print(os.getcwd())'",
-            )
             entry = bundle / "bin" / "skill-advisor-mcp"
-            entry.write_text(probe)
+            entry.write_text(ENTRYPOINT)
             entry.chmod(0o755)
+            (bundle / "runtime_guard.py").write_text(
+                "import os,sys\nprint(sys.prefix)\nprint(os.getcwd())\n"
+            )
             current = root / "runtime" / "current"
             current.parent.mkdir()
             current.symlink_to(bundle)

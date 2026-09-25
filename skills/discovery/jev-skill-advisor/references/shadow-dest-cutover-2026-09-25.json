@@ -1,0 +1,7 @@
+{
+  "summary": "Reversible host-local Jev capability bridge cutover on the verified dest Linux host, preserving Hermes Notion MCP and existing release, with live read and receipt canaries.",
+  "lead_choice": "consult",
+  "high_consequence": true,
+  "accepted_plan": true,
+  "explicit_advisor": "opus"
+}

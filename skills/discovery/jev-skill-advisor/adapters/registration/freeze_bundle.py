@@ -23,13 +23,12 @@ from pathlib import Path
 
 PACKAGE = Path("skills/discovery/jev-skill-advisor")
 REVISION = "3fc6118"
-RELEASE = "a528d001220eec155f1172f3b9b76793177ae2479dd5d054ae246c047e2e26bc"
 BLOCKED_PATH_PARTS = ("CloudStorage", "Dropbox")
 SECRET_NAMES = {"credential.env", "workspace.json", ".env"}
 ENTRYPOINT = """#!/bin/sh
 physical=$(realpath "$0") || exit 1
 here=$(dirname "$physical") || exit 1
-exec "$here/python" -I -s -m jev_skill_advisor.mcp_server "$@"
+exec "$here/python" -I -s "$here/../runtime_guard.py" "$@"
 """
 INTERPRETER_PROBE = """
 import pathlib, sys
@@ -275,6 +274,7 @@ def build(repo: Path, output_root: Path, *, revision: str, release: str, python:
         for virtualenv_hook in bundle.glob("lib/python*/site-packages/_virtualenv.pth"):
             virtualenv_hook.unlink()
         shutil.copy2(source / "adapters" / "registration" / "run_bridge.py", bundle / "run_bridge.py")
+        shutil.copy2(source / "adapters" / "registration" / "runtime_guard.py", bundle / "runtime_guard.py")
         entrypoint = bundle / "bin" / "skill-advisor-mcp"
         entrypoint.write_text(ENTRYPOINT)
         entrypoint.chmod(0o755)
@@ -318,8 +318,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", type=Path)
     parser.add_argument("--output-root", type=Path)
     parser.add_argument("--bundle", type=Path)
-    parser.add_argument("--revision", default=REVISION)
-    parser.add_argument("--release", default=RELEASE)
+    parser.add_argument("--revision")
+    parser.add_argument("--release")
     parser.add_argument("--python", type=Path, default=Path(sys._base_executable))
     args = parser.parse_args(argv)
     try:
@@ -330,7 +330,7 @@ def main(argv: list[str] | None = None) -> int:
             report = {"status": "verified", "bundle": str(args.bundle),
                       "release_id": manifest["release_id"], "files": len(manifest["files"])}
         else:
-            if args.repo is None or args.output_root is None:
+            if args.repo is None or args.output_root is None or args.revision is None or args.release is None:
                 raise BundleError("build_inputs_missing")
             bundle, changed = build(args.repo, args.output_root, revision=args.revision,
                                     release=args.release, python=args.python)
