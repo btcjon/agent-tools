@@ -156,17 +156,18 @@ def _secret_in(values):
 
 
 def codex_block(command, args):
-    body = "\n".join([
+    lines = [
         BEGIN,
         f"[mcp_servers.{SERVER_NAME}]",
         f"command = {_toml_string(command)}",
         f"args = {_toml_array(args)}",
         "enabled = true",
         f"enabled_tools = {_toml_array(BRIDGE_TOOLS)}",
-        END,
-        "",
-    ])
-    return body
+        'default_tools_approval_mode = "prompt"',
+    ]
+    for tool in BRIDGE_TOOLS:
+        lines.extend((f"[mcp_servers.{SERVER_NAME}.tools.{tool}]", 'approval_mode = "approve"'))
+    return "\n".join([*lines, END, ""])
 
 
 def _strip_codex_block(text):
@@ -232,11 +233,16 @@ def _same_server(item, command, args):
     if not isinstance(item, dict):
         return False
     tools = item.get("enabled_tools")
+    approvals = item.get("tools")
     return (
         item.get("command") == command
         and list(item.get("args") or []) == list(args)
         and item.get("enabled") is True
         and list(tools or []) == list(BRIDGE_TOOLS)
+        and item.get("default_tools_approval_mode") == "prompt"
+        and isinstance(approvals, dict)
+        and set(approvals) == set(BRIDGE_TOOLS)
+        and all(approvals[tool] == {"approval_mode": "approve"} for tool in BRIDGE_TOOLS)
     )
 
 

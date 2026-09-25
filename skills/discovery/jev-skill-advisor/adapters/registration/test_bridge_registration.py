@@ -1,6 +1,7 @@
 import json
 import hashlib
 import sys
+import tomllib
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -82,16 +83,41 @@ class RegistrationRenderingTests(unittest.TestCase):
             self.assertEqual(raised.exception.code, "ntn_version_mismatch")
 
     def test_codex_preserves_unrelated_server_and_disables_only_ours(self):
-        original = '[mcp_servers.other]\ncommand = "other"\nargs = ["--safe"]\n'
+        original = 'model = "test"\n\n[mcp_servers.other]\ncommand = "other"\nargs = ["--safe"]\n'
         changed, did_change = render_codex(original, "/bin/echo", ["--release-root", "/tmp/pinned"])
         self.assertTrue(did_change)
         self.assertIn("[mcp_servers.other]", changed)
         self.assertIn("[mcp_servers.jev-capability-bridge]", changed)
         self.assertIn('enabled_tools = ["skill_suggest",', changed)
+        parsed = tomllib.loads(changed)
+        server = parsed["mcp_servers"]["jev-capability-bridge"]
+        self.assertEqual(server["default_tools_approval_mode"], "prompt")
+        self.assertEqual(set(server["tools"]), set(BRIDGE_TOOLS))
+        self.assertTrue(all(server["tools"][name] == {"approval_mode": "approve"} for name in BRIDGE_TOOLS))
+        self.assertEqual(parsed["model"], "test")
+        self.assertEqual(parsed["mcp_servers"]["other"], {"command": "other", "args": ["--safe"]})
         repeated, repeated_change = render_codex(changed, "/bin/echo", ["--release-root", "/tmp/pinned"])
         self.assertFalse(repeated_change)
         self.assertEqual(repeated, changed)
         restored, disabled = disable_codex(changed)
+        self.assertTrue(disabled)
+        self.assertEqual(restored.strip(), original.strip())
+
+    def test_codex_repairs_approval_drift_and_rejects_extra_tool(self):
+        original = '[mcp_servers.other]\ncommand = "other"\n'
+        canonical, _ = render_codex(original, "/bin/echo", ["--safe"])
+        drifted = canonical.replace('approval_mode = "approve"', 'approval_mode = "prompt"', 1)
+        repaired, changed = render_codex(drifted, "/bin/echo", ["--safe"])
+        self.assertTrue(changed)
+        self.assertEqual(repaired, canonical)
+        extra = canonical.replace(
+            "# END jev-capability-bridge",
+            '[mcp_servers.jev-capability-bridge.tools.sixth]\napproval_mode = "approve"\n# END jev-capability-bridge',
+        )
+        repaired, changed = render_codex(extra, "/bin/echo", ["--safe"])
+        self.assertTrue(changed)
+        self.assertEqual(repaired, canonical)
+        restored, disabled = disable_codex(extra)
         self.assertTrue(disabled)
         self.assertEqual(restored.strip(), original.strip())
 
