@@ -1,12 +1,13 @@
 """Optional official-SDK stdio MCP transport."""
 from __future__ import annotations
 import argparse
+import hashlib
 import time
 from pathlib import Path
 from typing import Literal
 from .profile import load_profile
 from .service import SkillAdvisorService
-from .release import ReleaseStore
+from .release import ReleaseError, ReleaseStore
 from . import capability_choice, capability_core, capability_observability, notion_mcp_transport
 
 
@@ -104,17 +105,55 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
     ArgModelBase.model_config["extra"] = "forbid"
     if (config is None) == (release_root is None):
         raise ValueError("choose_config_or_release_root")
+    if release_root is not None and capability_manifest is not None:
+        raise ValueError("release_root_rejects_static_manifest")
     static_service = SkillAdvisorService(load_profile(config)) if config else None
     store = ReleaseStore(release_root) if release_root else None
-    manifest = capability_core.load_manifest(capability_manifest) if capability_manifest else None
+    static_manifest = capability_core.load_manifest(capability_manifest) if capability_manifest else None
+    # release_id -> (content_hash, manifest). Served only after a fresh hash check.
+    manifest_cache: dict[str, tuple[str, object]] = {}
 
-    def service_for(session_id):
+    def bound_manifest(release_id, release_manifest):
+        files = release_manifest.get("files") if isinstance(release_manifest, dict) else None
+        item = files.get("capability_manifest") if isinstance(files, dict) else None
+        loaded = store.load_bound_capability_manifest(release_id)
+        if not isinstance(item, dict):
+            if loaded is not None:
+                raise ReleaseError("capability_manifest_invalid")
+            manifest_cache.pop(release_id, None)
+            return None
+        expected = item.get("content_hash")
+        recorded = item.get("sha256")
+        path_text = item.get("path")
+        if loaded is None or not isinstance(expected, str) or loaded.content_hash != expected:
+            raise ReleaseError("capability_manifest_invalid")
+        if not isinstance(path_text, str) or not isinstance(recorded, str):
+            raise ReleaseError("capability_manifest_invalid")
+        path = Path(path_text)
+        if path.is_symlink() or not path.is_file():
+            raise ReleaseError("capability_manifest_missing")
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest != recorded or loaded.content_hash != expected:
+            raise ReleaseError("capability_manifest_invalid")
+        cached = manifest_cache.get(release_id)
+        if cached is not None and cached[0] == expected and getattr(cached[1], "content_hash", None) == expected:
+            return cached[1]
+        manifest_cache[release_id] = (loaded.content_hash, loaded)
+        return loaded
+
+    def binding_for(session_id):
         if static_service is not None:
-            return static_service
+            return static_service, static_manifest
         if not host or not harness:
             raise ValueError("release_resolution_requires_host_and_harness")
-        _, _, profile = store.resolve_profile(host=host, harness=harness, session_id=session_id)
-        return SkillAdvisorService(profile)
+        release_id, release_manifest, profile = store.resolve_profile(
+            host=host, harness=harness, session_id=session_id,
+        )
+        return SkillAdvisorService(profile), bound_manifest(release_id, release_manifest)
+
+    def service_for(session_id):
+        service, _bound = binding_for(session_id)
+        return service
     server = MCPServer("jev-skill-advisor")
 
     def evaluator_for(service):
@@ -132,7 +171,7 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
                  "task": task, "context": context, "explicit_skills": explicit_skills or []}
         if available_ids is not None:
             value["available_ids"] = available_ids
-        service = service_for(session_id)
+        service, manifest = binding_for(session_id)
         response = service.suggest(value)
         if manifest is None or response.get("status") not in {"suggested", "explicit_selection", "complete"}:
             return response
@@ -189,14 +228,16 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
             "outcome": outcome, "evidence": evidence, "reason_code": reason_code}
         return service_for(session_id).report_outcome(value)
 
-    if manifest is not None:
+    if static_manifest is not None or store is not None:
         @server.tool()
         def capability_describe(protocol_version: Literal[1], session_id: str, receipt_id: str, capability_id: str) -> dict:
             if protocol_version != 1 or isinstance(protocol_version, bool):
                 raise ValueError("invalid_protocol_version")
             if not all(isinstance(item, str) for item in (session_id, receipt_id, capability_id)):
                 raise ValueError("invalid_capability_request")
-            service = service_for(session_id)
+            service, manifest = binding_for(session_id)
+            if store is not None and manifest is None:
+                return {"status": "denied", "reason": "capability_unbound"}
             receipt = _stored_capability_receipt(service, session_id, receipt_id)
             if receipt is None:
                 return {"status": "denied", "reason": "unauthorized_capability"}
@@ -207,14 +248,16 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
             except capability_core.CapabilityError as exc:
                 return {"status": "denied", "reason": exc.code}
 
-    if manifest is not None and notion_bridge is not None:
+    if notion_bridge is not None and (static_manifest is not None or store is not None):
         @server.tool(name="notion-fetch", description="Read one Notion page by id when the stored receipt authorizes notion-fetch.")
         def notion_fetch(protocol_version: Literal[1], session_id: str, receipt_id: str, page_id: str) -> dict:
             if protocol_version != 1 or isinstance(protocol_version, bool):
                 raise ValueError("invalid_protocol_version")
             if not all(isinstance(item, str) for item in (session_id, receipt_id, page_id)):
                 raise ValueError("invalid_capability_request")
-            service = service_for(session_id)
+            service, manifest = binding_for(session_id)
+            if store is not None and manifest is None:
+                return {"status": "denied", "reason": "capability_unbound"}
             receipt = _stored_capability_receipt(service, session_id, receipt_id)
             fetch_id = _fetch_capability_id(manifest)
             started = time.perf_counter()
@@ -266,7 +309,9 @@ def parse_args(argv):
     parser.add_argument("--notion-transport", choices=("hermes",))
     parser.add_argument("--notion-server", default="notion")
     args = parser.parse_args(argv)
-    if args.notion_transport and args.capability_manifest is None:
+    if args.release_root is not None and args.capability_manifest is not None:
+        parser.error("--capability-manifest cannot be combined with --release-root")
+    if args.notion_transport and args.capability_manifest is None and args.release_root is None:
         parser.error("--notion-transport requires --capability-manifest")
     return args
 
