@@ -1,6 +1,6 @@
 from __future__ import annotations
 from copy import deepcopy
-import hashlib, json, os, subprocess, sys, tempfile, unittest
+import hashlib, json, os, sqlite3, subprocess, sys, tempfile, unittest
 from pathlib import Path
 
 from jev_skill_advisor.exposure import MODEL
@@ -79,6 +79,14 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(stats["outcomes"]["applied"], 1)
         self.assertEqual(stats["records"]["receipt_reads"], 1)
         self.assertNotIn("use alpha procedure", json.dumps(stats))
+
+    def test_lifetime_prompt_count_does_not_disable_later_requests(self):
+        with sqlite3.connect(self.state / "advisor.sqlite3") as connection:
+            connection.execute("UPDATE budget_domains SET consumed=20 WHERE name='prompts'")
+        for number in range(2):
+            result = self.suggest(request_id=f"after-limit-{number}")
+            self.assertEqual(result["status"], "suggested")
+        self.assertEqual(self.runtime.counts()["prompts"], 22)
 
     def test_explicit_is_zero_call_and_availability_only_narrows(self):
         result = self.suggest(explicit_skills=["alpha"], available_ids=["warehouse:alpha"])
@@ -202,7 +210,7 @@ class ServiceTests(unittest.TestCase):
             def start(self):
                 profile,data,operation_id,queue=self.args
                 child = ServiceRuntime(profile, operation_id=operation_id)
-                self.assert_reserved = child._reserve("provider_attempts", profile.provider_attempt_limit)
+                self.assert_reserved = child._reserve_provider_attempt()
                 queue.put({"status":"incomplete","reason":"worker_failure","selected":[],"attempts":0,
                            "provider_attempts":0,"cache_hits":0,"input_tokens":0,"unknown_usage":0})
             def join(self,*_): pass

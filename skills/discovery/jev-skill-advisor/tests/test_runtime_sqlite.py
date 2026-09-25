@@ -17,9 +17,17 @@ class SQLiteRuntimeTests(unittest.TestCase):
         ServiceRuntime(self.profile,initialize=True)
 
     def test_concurrent_budget_reservation_is_atomic(self):
-        runtimes=[ServiceRuntime(self.profile) for _ in range(30)]
+        runtimes=[ServiceRuntime(self.profile, operation_id="shared-request") for _ in range(30)]
         with ThreadPoolExecutor(max_workers=12) as pool: results=list(pool.map(lambda runtime: runtime.reserve_prompt(),runtimes))
         self.assertEqual(sum(results),20); self.assertEqual(ServiceRuntime(self.profile).counts()["prompts"],20)
+
+    def test_anonymous_runtime_keeps_one_window(self):
+        limited = replace(self.profile, prompt_limit=2)
+        runtime = ServiceRuntime(limited)
+        self.assertTrue(runtime.reserve_prompt())
+        self.assertTrue(runtime.reserve_prompt())
+        self.assertFalse(runtime.reserve_prompt())
+        self.assertEqual(runtime.counts()["prompts"], 2)
 
     def test_receipt_update_is_atomic(self):
         runtime=ServiceRuntime(self.profile); receipt={"receipt_id":"r1","profile_id":"sqlite-test","session_id":"s","expires_at":"2099-01-01T00:00:00Z","reads":{}}
@@ -38,6 +46,116 @@ class SQLiteRuntimeTests(unittest.TestCase):
     def test_prune_does_not_reset_budgets(self):
         runtime=ServiceRuntime(self.profile); runtime.reserve_prompt(); runtime.prune(now=2_000_000_000)
         self.assertEqual(runtime.counts()["prompts"],1)
+
+    def test_provider_window_survives_a_full_lifetime_counter(self):
+        from jev_skill_advisor.client import AdvisorError
+        db=self.state/"advisor.sqlite3"
+        with sqlite3.connect(db) as connection:
+            connection.execute("UPDATE budget_domains SET consumed=160 WHERE name='provider_attempts'")
+        calls=[]
+        def fake(payload, key, timeout):
+            calls.append(payload); return {"answers":{}, "usage":{"input_tokens":1}}, {}
+        runtime=ServiceRuntime(replace(self.profile, provider_enabled=True, provider_attempt_limit=2), evaluate_fn=fake, operation_id="req-1")
+        runtime.key="test"
+        self.assertEqual(runtime.evaluator({"n": 1}, 1)["_cache_hit"], False)
+        self.assertEqual(runtime.counts("req-1")["provider_attempts"], 161)
+        self.assertEqual(runtime.counts("req-1")["request_provider_attempts"], 1)
+        runtime.evaluator({"n": 2}, 1)
+        with self.assertRaisesRegex(AdvisorError, "local_provider_attempt_budget"):
+            runtime.evaluator({"n": 3}, 1)
+        self.assertEqual(len(calls), 2)
+        fresh=ServiceRuntime(replace(self.profile, provider_enabled=True, provider_attempt_limit=2), evaluate_fn=fake, operation_id="req-2")
+        fresh.key="test"
+        self.assertEqual(fresh.evaluator({"n": 4}, 1)["_cache_hit"], False)
+        self.assertEqual(fresh.counts()["provider_attempts"], 163)
+
+    def test_anonymous_windows_do_not_share_a_prompt_budget(self):
+        from concurrent.futures import as_completed
+        limited = replace(self.profile, prompt_limit=1)
+        def once(_):
+            return ServiceRuntime(limited).reserve_prompt()
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(once, range(12)))
+        self.assertEqual(results, [True] * 12)
+        self.assertEqual(ServiceRuntime(self.profile).counts()["prompts"], 12)
+
+    def test_one_request_cannot_overspend_prompts(self):
+        limited = replace(self.profile, prompt_limit=2)
+        runtime = ServiceRuntime(limited, operation_id="same-request")
+        assert runtime.reserve_prompt() and runtime.reserve_prompt()
+        self.assertFalse(runtime.reserve_prompt())
+        self.assertEqual(runtime.counts("same-request")["prompts"], 2)
+
+    def test_startup_migrates_v1_without_resetting_provider_history(self):
+        db=self.state/"advisor.sqlite3"
+        with sqlite3.connect(db) as connection:
+            connection.execute("DELETE FROM schema_versions WHERE version=2")
+            connection.execute("DROP TABLE request_windows")
+            connection.execute("UPDATE budget_domains SET consumed=160 WHERE name='provider_attempts'")
+        runtime=ServiceRuntime(self.profile)
+        self.assertEqual(runtime.counts()["provider_attempts"], 160)
+        with sqlite3.connect(db) as connection:
+            self.assertEqual([row[0] for row in connection.execute("SELECT version FROM schema_versions ORDER BY version")], [1, 2])
+
+    def test_startup_migrates_early_v2_window_without_losing_counts(self):
+        from jev_skill_advisor.client import AdvisorError
+        db = self.state / "advisor.sqlite3"
+        with sqlite3.connect(db) as connection:
+            connection.execute("DROP TABLE request_windows")
+            connection.execute("CREATE TABLE request_windows(operation_id TEXT PRIMARY KEY, provider_attempts INTEGER NOT NULL, created_at TEXT NOT NULL)")
+            connection.execute("INSERT INTO request_windows VALUES('old-request', 3, '2026-09-20T00:00:00Z')")
+            connection.execute("UPDATE budget_domains SET consumed=160 WHERE name='provider_attempts'")
+            connection.execute("UPDATE budget_domains SET consumed=20 WHERE name='prompts'")
+        runtime = ServiceRuntime(self.profile)
+        limited = replace(self.profile, prompt_limit=2, provider_attempt_limit=2)
+        request = ServiceRuntime(limited, operation_id="new-request", evaluation_id="migration-eval", evaluation_limit=2)
+        self.assertTrue(request.reserve_prompt())
+        self.assertTrue(request.reserve_prompt())
+        self.assertFalse(request.reserve_prompt())
+        self.assertTrue(request._reserve_provider_attempt())
+        self.assertTrue(request._reserve_provider_attempt())
+        self.assertFalse(request._reserve_provider_attempt())
+        another = ServiceRuntime(limited, operation_id="another-request", evaluation_id="migration-eval", evaluation_limit=2)
+        with self.assertRaisesRegex(AdvisorError, "evaluation_provider_attempt_budget"):
+            another._reserve_provider_attempt()
+        with sqlite3.connect(db) as connection:
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(request_windows)")}
+            self.assertIn("prompts", columns)
+            self.assertEqual(connection.execute("SELECT provider_attempts, prompts FROM request_windows WHERE operation_id='old-request'").fetchone(), (3, 0))
+            self.assertEqual(connection.execute("SELECT provider_attempts, prompts FROM request_windows WHERE operation_id='new-request'").fetchone(), (2, 2))
+            self.assertEqual(connection.execute("SELECT provider_attempts, prompts FROM request_windows WHERE operation_id='eval-migration-eval'").fetchone(), (2, 0))
+            for prompts, created_at in connection.execute("SELECT prompts, created_at FROM request_windows"):
+                self.assertIsInstance(prompts, int)
+                self.assertRegex(created_at, r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        self.assertEqual(runtime.counts()["provider_attempts"], 162)
+        self.assertEqual(runtime.counts()["prompts"], 22)
+
+    def test_evaluation_allowance_is_atomic_and_cache_hits_are_free(self):
+        from jev_skill_advisor.client import AdvisorError
+        enabled = replace(self.profile, provider_enabled=True)
+        calls = []
+        def fake(payload, key, timeout):
+            calls.append(payload)
+            return {"answers": {}, "usage": {"input_tokens": 1}}, {}
+        runtimes = [ServiceRuntime(enabled, evaluate_fn=fake, operation_id=f"eval-request-{n}",
+                                   evaluation_id="shared-eval", evaluation_limit=3) for n in range(12)]
+        for runtime in runtimes:
+            runtime.key = "test"
+        def call(item):
+            index, runtime = item
+            try:
+                return runtime.evaluator({"n": index}, 1)["_cache_hit"]
+            except AdvisorError as exc:
+                return str(exc)
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            results = list(pool.map(call, enumerate(runtimes)))
+        self.assertEqual(results.count(False), 3)
+        self.assertEqual(results.count("evaluation_provider_attempt_budget"), 9)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(ServiceRuntime(self.profile).counts()["provider_attempts"], 3)
+        cached_index = results.index(False)
+        self.assertTrue(runtimes[cached_index].evaluator({"n": cached_index}, 1)["_cache_hit"])
+        self.assertEqual(ServiceRuntime(self.profile).counts()["provider_attempts"], 3)
 
     def test_startup_rejects_unknown_schema_and_missing_budget(self):
         db=self.state/"advisor.sqlite3"

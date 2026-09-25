@@ -23,7 +23,9 @@ def _protected(text):
 
 def _scan_process(profile, data, operation_id, queue):
     try:
-        runtime = ServiceRuntime(profile, operation_id=operation_id)
+        runtime = ServiceRuntime(profile, operation_id=operation_id,
+                                 evaluation_id=data.get("_evaluation_id"),
+                                 evaluation_limit=data.get("_evaluation_limit"))
         registry = profile.registry(data["available_ids"], implicit_only=True)
         queue.put(rank_choice_scan(registry, data["task"], data["context"], runtime.evaluator,
                        deadline_s=profile.deadline_s, max_calls=min(2, profile.max_calls),
@@ -113,13 +115,16 @@ class SkillAdvisorService:
             return self._response(data, "unavailable", "protected_input", evidence=evidence)
         if not self.profile.provider_enabled or not self.runtime.key:
             return self._response(data, "unavailable", "provider_unavailable", evidence=evidence)
-        if not self.runtime.reserve_prompt():
-            return self._response(data, "unavailable", "prompt_budget", evidence=evidence)
+        operation_id = self.runtime.new_receipt_id()
+        if not self.runtime.reserve_prompt(operation_id=operation_id):
+            return self._response(data, "unavailable", "local_prompt_budget", evidence=evidence)
         if type(self.runtime) is ServiceRuntime:
-            operation_id = self.runtime.new_receipt_id()
             ctx = multiprocessing.get_context("spawn")
             queue = ctx.Queue(maxsize=1)
             scan_data = {**data, "available_ids": available_ids}
+            if getattr(self.runtime, "evaluation_id", None) is not None:
+                scan_data["_evaluation_id"] = self.runtime.evaluation_id
+                scan_data["_evaluation_limit"] = self.runtime.evaluation_limit
             process = ctx.Process(target=_scan_process, args=(self.profile, scan_data, operation_id, queue), daemon=True)
             process.start(); process.join(self.profile.deadline_s)
             if process.is_alive():

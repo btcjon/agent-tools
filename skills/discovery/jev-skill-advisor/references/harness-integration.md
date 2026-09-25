@@ -18,20 +18,24 @@ skill-search --select --name "<skill-name>" --json
 
 A keyword search without `--select` scores the same snapshot catalog. It is a lookup, not the delivery path.
 
+## Where a skill is written
+
+Update an existing skill before creating another. Put durable, reusable, harness-independent procedures in Global Skills, even when Hermes authors them. Keep reusable Hermes-specific procedures native under `~/.hermes/skills`. Leave one-off instructions and transient task details in the chat.
+
 ## Codex
 
 `scripts/codex_skill_hook.py` is the `UserPromptSubmit` command. It validates the event, calls the selector, and emits one bounded `hookSpecificOutput.additionalContext` when the hash matches. Empty stdout means nothing was added. A `Stop` observer can record the outcome. After a hook change, store the hash Codex itself reports as trusted. A guessed hash is skipped silently.
 
 ## Hermes
 
-The `warehouse-skills` plugin calls `skill-search --select` before the first model request and registers `skill_search` and `skill_view`. Native Hermes skills stay in Hermes's own skills directory. Cron turns skip selection. A null result adds no shared skill.
+The `warehouse-skills` plugin selects one skill before the first model request and registers `skill_search` and `skill_view`. Hermes does not run `skill-search` again from the shared startup text. Native Hermes skills stay in Hermes's own skills directory. A cron job gets a shared skill only when the job body already contains the procedure. A null result adds no shared skill. `skill_view` reads a Global Skills package from the snapshot before any native lookup.
 
 ## Cursor
 
 Cursor discovers skills. It does not inject this selector from a prompt hook. Two pieces have to be present:
 
 - `skill-discovery` in the skills directory Cursor already scans.
-- An always-on startup instruction that runs `skill-search --select` before other tools when the task needs a procedure. Listing the skill path is not enough.
+- An always-on startup instruction that runs `skill-search --select --receipt` before other tools. Listing the skill path is not enough. Put `--receipt` only on the Cursor command. Hermes, Codex, and Pi already write their own receipts. The app and the `agent` CLI both receive the user rule. The app also loads `~/.cursor/rules` when `alwaysApply` is true. A chat that is already open keeps the instructions it started with.
 
 ## Pi
 

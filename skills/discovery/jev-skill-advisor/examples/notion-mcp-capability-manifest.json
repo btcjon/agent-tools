@@ -1,0 +1,66 @@
+{
+  "manifest_version": 1,
+  "description": "Sample pins for the Notion MCP server. Startup sees ids and summaries only.",
+  "entries": [
+    {
+      "id": "notion.mcp.fetch",
+      "server": "notion",
+      "operation": "notion-fetch",
+      "summary": "Read one Notion page, database, or view by id or URL.",
+      "writes": false,
+      "schema_hash": "7717dd85c2e5ff939b47bf9369acc9c59e449e42f2f3bff74058dcd2eea9242d",
+      "source": "examples/notion-mcp-capability-manifest.json",
+      "provenance": "sample-pin-2026-09-24; sha256 of the canonical tool input object; not a live catalog capture"
+    },
+    {
+      "id": "notion.mcp.search",
+      "server": "notion",
+      "operation": "notion-search",
+      "summary": "Search the connected Notion workspace by keyword.",
+      "writes": false,
+      "schema_hash": "090ccec4b99bb86fb44f8f6382382443652a1ad0b5dc892a28b26cc2d90ddc97",
+      "source": "examples/notion-mcp-capability-manifest.json",
+      "provenance": "sample-pin-2026-09-24; sha256 of the canonical tool input object; not a live catalog capture"
+    },
+    {
+      "id": "notion.mcp.query-data-sources",
+      "server": "notion",
+      "operation": "notion-query-data-sources",
+      "summary": "Query rows in a Notion data source.",
+      "writes": false,
+      "schema_hash": "c6189704ad8bbfb076d0403f649d8640341f26d7aed46c2ee9b1bee4209281dd",
+      "source": "examples/notion-mcp-capability-manifest.json",
+      "provenance": "sample-pin-2026-09-24; sha256 of the canonical tool input object; not a live catalog capture"
+    },
+    {
+      "id": "notion.mcp.get-comments",
+      "server": "notion",
+      "operation": "notion-get-comments",
+      "summary": "Read comments on a Notion page.",
+      "writes": false,
+      "schema_hash": "34b4435dd44952646b7f5f878e376ed16b90ec4550227babceeafe0d2b4c532f",
+      "source": "examples/notion-mcp-capability-manifest.json",
+      "provenance": "sample-pin-2026-09-24; sha256 of the canonical tool input object; not a live catalog capture"
+    },
+    {
+      "id": "notion.mcp.create-pages",
+      "server": "notion",
+      "operation": "notion-create-pages",
+      "summary": "Create Notion pages under a parent.",
+      "writes": true,
+      "schema_hash": "b070783e889b688e5b208d96f9125e876bbd7850f6fd44732b274b95e809ad3b",
+      "source": "examples/notion-mcp-capability-manifest.json",
+      "provenance": "sample-pin-2026-09-24; sha256 of the canonical tool input object; not a live catalog capture"
+    },
+    {
+      "id": "notion.mcp.update-page",
+      "server": "notion",
+      "operation": "notion-update-page",
+      "summary": "Update a Notion page body or properties.",
+      "writes": true,
+      "schema_hash": "efeecb9e602f23de7fc9345c560c1aa16c3fde2db2481cddaef7599d3381dc6e",
+      "source": "examples/notion-mcp-capability-manifest.json",
+      "provenance": "sample-pin-2026-09-24; sha256 of the canonical tool input object; not a live catalog capture"
+    }
+  ]
+}

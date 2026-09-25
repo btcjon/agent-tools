@@ -11,8 +11,16 @@ def iso(ts=None):
     return datetime.fromtimestamp(ts or time.time(), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 class ServiceRuntime:
-    def __init__(self, profile, evaluate_fn=evaluate, operation_id=None, initialize=False, allow_pending_legacy=False):
+    def __init__(self, profile, evaluate_fn=evaluate, operation_id=None, initialize=False,
+                 allow_pending_legacy=False, evaluation_id=None, evaluation_limit=None):
         self.profile, self.evaluate_fn, self.operation_id = profile, evaluate_fn, operation_id
+        self._anonymous_window_id = "anon-" + uuid.uuid4().hex
+        if (evaluation_id is None) != (evaluation_limit is None):
+            raise ValueError("incomplete_evaluation_budget")
+        if evaluation_id is not None and (not isinstance(evaluation_id, str) or not evaluation_id or
+                                          type(evaluation_limit) is not int or evaluation_limit < 1):
+            raise ValueError("invalid_evaluation_budget")
+        self.evaluation_id, self.evaluation_limit = evaluation_id, evaluation_limit
         self.key = credential(profile) if profile.provider_enabled else None
         self.db_path = profile.state_dir / "advisor.sqlite3"
         if not self.db_path.exists():
@@ -22,6 +30,7 @@ class ServiceRuntime:
             if not initialize: raise RuntimeError("database_not_initialized")
             self._initialize()
         self._validate()
+        self._migrate_request_windows()
         if not allow_pending_legacy: self._validate_legacy_imports()
 
     def _connect(self):
@@ -37,6 +46,7 @@ class ServiceRuntime:
             CREATE TABLE IF NOT EXISTS schema_versions(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS budget_domains(name TEXT PRIMARY KEY, consumed INTEGER NOT NULL CHECK(consumed>=0));
             CREATE TABLE IF NOT EXISTS operations(id TEXT PRIMARY KEY, provider_attempts INTEGER NOT NULL DEFAULT 0 CHECK(provider_attempts>=0), created_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS request_windows(operation_id TEXT PRIMARY KEY, provider_attempts INTEGER NOT NULL DEFAULT 0 CHECK(provider_attempts>=0), prompts INTEGER NOT NULL DEFAULT 0 CHECK(prompts>=0), created_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS receipts(id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, session_id TEXT NOT NULL, expires_at TEXT NOT NULL, payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS receipt_bindings(receipt_id TEXT NOT NULL REFERENCES receipts(id) ON DELETE CASCADE, skill_id TEXT NOT NULL, content_hash TEXT NOT NULL, policy_hash TEXT NOT NULL, PRIMARY KEY(receipt_id,skill_id));
             CREATE TABLE IF NOT EXISTS receipt_reads(receipt_id TEXT NOT NULL REFERENCES receipts(id) ON DELETE CASCADE, skill_id TEXT NOT NULL, content_hash TEXT NOT NULL, body_bytes INTEGER NOT NULL CHECK(body_bytes>=0), PRIMARY KEY(receipt_id,skill_id));
@@ -44,15 +54,36 @@ class ServiceRuntime:
             CREATE TABLE IF NOT EXISTS response_cache(cache_key TEXT PRIMARY KEY, created_at TEXT NOT NULL, payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS migration_imports(source TEXT PRIMARY KEY, content_hash TEXT NOT NULL, imported_at TEXT NOT NULL);
             INSERT OR IGNORE INTO schema_versions VALUES(1,strftime('%Y-%m-%dT%H:%M:%SZ','now'));
+            INSERT OR IGNORE INTO schema_versions VALUES(2,strftime('%Y-%m-%dT%H:%M:%SZ','now'));
             INSERT OR IGNORE INTO budget_domains VALUES('prompts',0),('provider_attempts',0); COMMIT;""")
         os.chmod(self.db_path, 0o600)
 
     def _validate(self):
         with self._connect() as db:
             versions=[row[0] for row in db.execute("SELECT version FROM schema_versions ORDER BY version")]
-            if versions != [1]: raise RuntimeError("unsupported_schema_version")
+            if versions not in ([1], [1, 2]): raise RuntimeError("unsupported_schema_version")
             budgets={row[0]:row[1] for row in db.execute("SELECT name,consumed FROM budget_domains")}
             if set(budgets)!={"prompts","provider_attempts"} or any(not isinstance(v,int) or v<0 for v in budgets.values()): raise RuntimeError("invalid_budget_state")
+
+    def _migrate_request_windows(self):
+        """Add the per-request window without resetting the historical counter."""
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            versions=[row[0] for row in db.execute("SELECT version FROM schema_versions ORDER BY version")]
+            if versions == [1, 2]:
+                if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='request_windows'").fetchone() is None:
+                    db.rollback()
+                    raise RuntimeError("invalid_budget_state")
+            else:
+                db.execute("CREATE TABLE IF NOT EXISTS request_windows(operation_id TEXT PRIMARY KEY, provider_attempts INTEGER NOT NULL DEFAULT 0 CHECK(provider_attempts>=0), prompts INTEGER NOT NULL DEFAULT 0 CHECK(prompts>=0), created_at TEXT NOT NULL)")
+                db.execute("INSERT OR IGNORE INTO schema_versions VALUES(2,?)", (iso(),))
+            columns = {row[1] for row in db.execute("PRAGMA table_info(request_windows)")}
+            if not {"operation_id", "provider_attempts", "created_at"} <= columns:
+                db.rollback()
+                raise RuntimeError("invalid_budget_state")
+            if "prompts" not in columns:
+                db.execute("ALTER TABLE request_windows ADD COLUMN prompts INTEGER NOT NULL DEFAULT 0 CHECK(prompts>=0)")
+            db.commit()
 
     def _legacy_sources(self):
         root=self.profile.state_dir; sources=[root/"counters.json",root/"outcomes.jsonl"]
@@ -75,25 +106,58 @@ class ServiceRuntime:
             if 0 <= age <= 86400:
                 response=json.loads(row["payload"]); response["usage"]={**(response.get("usage") or {}),"input_tokens":0}; response["_cache_hit"]=True; return response
         if not self.key: raise AdvisorError("missing_api_key")
-        if not self._reserve("provider_attempts",self.profile.provider_attempt_limit): raise AdvisorError("provider_attempt_budget")
+        if not self._reserve_provider_attempt(): raise AdvisorError("local_provider_attempt_budget")
         wire=deepcopy(payload); wire.pop("_cache_identity",None); response,_=self.evaluate_fn(wire,self.key,timeout)
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE"); db.execute("INSERT OR REPLACE INTO response_cache VALUES(?,?,?)",(key,iso(),json.dumps(response,sort_keys=True,separators=(",",":")))); db.commit()
         result=deepcopy(response); result["_cache_hit"]=False; return result
 
-    def reserve_prompt(self): return self._reserve("prompts",self.profile.prompt_limit)
-    def _reserve(self,name,limit):
+    def reserve_prompt(self, operation_id=None):
+        """Allow one prompt inside this request; lifetime totals are telemetry only."""
+        return self._reserve_window("prompts", self.profile.prompt_limit, operation_id=operation_id)
+    def _reserve_provider_attempt(self):
+        """Count one provider call inside this request. The lifetime total stays historical."""
+        return self._reserve_window("provider_attempts", self.profile.provider_attempt_limit)
+    def _reserve_window(self, column, limit, operation_id=None):
+        if column not in {"prompts", "provider_attempts"}:
+            raise ValueError("unknown_request_window")
+        window = operation_id or self.operation_id or self._anonymous_window_id
         with self._connect() as db:
-            db.execute("BEGIN IMMEDIATE"); row=db.execute("SELECT consumed FROM budget_domains WHERE name=?",(name,)).fetchone()
-            if row is None: db.rollback(); raise ValueError("missing_budget_domain")
-            if row[0] >= limit: db.rollback(); return False
-            db.execute("UPDATE budget_domains SET consumed=consumed+1 WHERE name=?",(name,))
-            if name=="provider_attempts" and self.operation_id:
-                db.execute("INSERT OR IGNORE INTO operations(id,created_at) VALUES(?,?)",(self.operation_id,iso())); db.execute("UPDATE operations SET provider_attempts=provider_attempts+1 WHERE id=?",(self.operation_id,))
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(f"SELECT {column} FROM request_windows WHERE operation_id=?", (window,)).fetchone()
+            used = 0 if row is None else row[0]
+            if used >= limit:
+                db.rollback(); return False
+            if column == "provider_attempts" and self.evaluation_id is not None:
+                evaluation_window = "eval-" + self.evaluation_id
+                evaluation = db.execute("SELECT provider_attempts FROM request_windows WHERE operation_id=?", (evaluation_window,)).fetchone()
+                if evaluation is not None and evaluation[0] >= self.evaluation_limit:
+                    db.rollback()
+                    raise AdvisorError("evaluation_provider_attempt_budget")
+                if evaluation is None:
+                    db.execute("INSERT INTO request_windows (operation_id, provider_attempts, prompts, created_at) VALUES(?,?,?,?)", (evaluation_window, 1, 0, iso()))
+                else:
+                    db.execute("UPDATE request_windows SET provider_attempts=provider_attempts+1 WHERE operation_id=?", (evaluation_window,))
+            domain = "prompts" if column == "prompts" else "provider_attempts"
+            db.execute("UPDATE budget_domains SET consumed=consumed+1 WHERE name=?", (domain,))
+            if row is None:
+                prompts = 1 if column == "prompts" else 0
+                attempts = 1 if column == "provider_attempts" else 0
+                db.execute("INSERT INTO request_windows (operation_id, provider_attempts, prompts, created_at) VALUES(?,?,?,?)", (window, attempts, prompts, iso()))
+            else:
+                db.execute(f"UPDATE request_windows SET {column}={column}+1 WHERE operation_id=?", (window,))
+            if column == "provider_attempts" and self.operation_id:
+                db.execute("INSERT OR IGNORE INTO operations(id,created_at) VALUES(?,?)", (self.operation_id, iso()))
+                db.execute("UPDATE operations SET provider_attempts=provider_attempts+1 WHERE id=?", (self.operation_id,))
             db.commit(); return True
     def counts(self,operation_id=None):
         with self._connect() as db:
             result={r[0]:r[1] for r in db.execute("SELECT name,consumed FROM budget_domains")}
+            window=operation_id or self.operation_id
+            if window:
+                row=db.execute("SELECT provider_attempts FROM request_windows WHERE operation_id=?",(window,)).fetchone()
+                result["request_provider_attempts"]=row[0] if row else 0
+                result["request_provider_attempts_remaining"]=max(0,self.profile.provider_attempt_limit-(row[0] if row else 0))
             if operation_id:
                 row=db.execute("SELECT provider_attempts FROM operations WHERE id=?",(operation_id,)).fetchone(); result["operation_attempts"]=row[0] if row else 0
         return result
@@ -116,7 +180,10 @@ class ServiceRuntime:
         percentile=lambda p: latencies[max(0,math.ceil(p*len(latencies))-1)] if latencies else None
         budgets=self.counts()
         return {"profile":{"profile_id":self.profile.profile_id,"catalog_hash":self.profile.catalog_hash,"eligible_skills":len(self.profile.eligible_ids)},
-            "budgets":{**budgets,"prompts_remaining":max(0,self.profile.prompt_limit-budgets.get("prompts",0)),"provider_attempts_remaining":max(0,self.profile.provider_attempt_limit-budgets.get("provider_attempts",0))},
+            "budgets":{**budgets,"prompt_limit_scope":"per_request","prompts_lifetime":budgets.get("prompts",0),
+                "prompts_remaining":self.profile.prompt_limit,
+                "provider_attempt_limit_scope":"per_request","provider_attempts_lifetime":budgets.get("provider_attempts",0),
+                "provider_attempts_remaining":self.profile.provider_attempt_limit},
             "records":tables,"statuses":statuses,"reasons":reasons,"selection_counts":selected,
             "provider":{"scope":"currently_retained_receipts","samples":len(latencies),"attempts":provider_attempts,"cache_hits":cache_hits,"input_tokens":input_tokens,"unknown_usage":unknown_usage,"latency_ms_p50_nearest_rank":percentile(.5),"latency_ms_p95_nearest_rank":percentile(.95)},
             "outcomes":outcomes,"outcome_evidence":evidence,"last_operation_at":last,"privacy":"counts_ids_labels_and_aggregates_only"}

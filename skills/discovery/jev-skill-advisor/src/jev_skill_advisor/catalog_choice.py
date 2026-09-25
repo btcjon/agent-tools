@@ -123,6 +123,8 @@ def catalog_choice_scan(entries, request, context, evaluator, *, deadline_s=20.0
                 receipt["unknown_usage"] += 1
             validate_response(response, payload["questions"], MODEL)
         except Exception as exc:
+            if str(exc) == "local_provider_attempt_budget":
+                return None, "local_provider_attempt_budget"
             if not accounted and str(exc) != "provider_attempt_budget":
                 receipt["provider_attempts"] += 1
                 receipt["unknown_usage"] += 1

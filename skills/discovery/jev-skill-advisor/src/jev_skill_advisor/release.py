@@ -21,6 +21,15 @@ def _digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _load_capability_manifest(path: Path, *, code: str):
+    """Validate manifest bytes with capability_core.load_manifest."""
+    from .capability_core import CapabilityError, load_manifest
+    try:
+        return load_manifest(path)
+    except CapabilityError as exc:
+        raise ReleaseError(code) from exc
+
+
 def _canonical(value) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
@@ -67,7 +76,8 @@ class ReleaseStore:
 
     def create(self, *, snapshot_id: str, snapshot_root: Path, catalog_path: Path,
                profiles: dict[str, Path], evidence: dict[str, Path], revision: str,
-               activation: str = "shadow", _test_unbound: bool = False) -> str:
+               activation: str = "shadow", capability_manifest: Path | None = None,
+               _test_unbound: bool = False) -> str:
         if activation not in {"shadow", "selection", "delivery"}:
             raise ReleaseError("invalid_activation")
         if not _test_unbound and set(evidence) != {"inventory", "parity", "tests"}:
@@ -78,6 +88,14 @@ class ReleaseStore:
                       for name, path in sorted(profiles.items())})
         files.update({f"evidence:{name}": {"path": str(Path(path).resolve()), "sha256": _digest(Path(path))}
                       for name, path in sorted(evidence.items())})
+        if capability_manifest is not None:
+            copied = Path(capability_manifest).resolve()
+            inputs_root = (self.root / "release-inputs").resolve()
+            if copied.is_symlink() or inputs_root not in copied.parents:
+                raise ReleaseError("capability_manifest_invalid")
+            loaded = _load_capability_manifest(copied, code="invalid_capability_manifest")
+            files["capability_manifest"] = {"path": str(copied), "sha256": _digest(copied),
+                                            "content_hash": loaded.content_hash}
         catalog = json.loads(catalog_path.read_text())
         ids = sorted({row["stable_id"] for row in [*catalog.get("entries", []), *catalog.get("exclusions", [])]})
         manifest = {"schema_version": 0 if _test_unbound else 2, "activation": activation,
@@ -121,10 +139,32 @@ class ReleaseStore:
             raise ReleaseError("missing_or_invalid_release") from exc
         if hashlib.sha256(_canonical(manifest)).hexdigest() != release_id:
             raise ReleaseError("release_manifest_tampered")
-        for item in manifest.get("files", {}).values():
-            candidate = Path(item["path"])
-            if not candidate.is_file() or _digest(candidate) != item["sha256"]:
+        files = manifest.get("files", {})
+        if not isinstance(files, dict):
+            raise ReleaseError("missing_or_invalid_release")
+        for name, item in files.items():
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str) or not isinstance(item.get("sha256"), str):
                 raise ReleaseError("release_file_tampered")
+            candidate = Path(item["path"])
+            if name == "capability_manifest":
+                if candidate.is_symlink():
+                    raise ReleaseError("capability_manifest_invalid")
+                if not candidate.is_file():
+                    raise ReleaseError("capability_manifest_missing")
+            if not candidate.is_file() or candidate.is_symlink() or _digest(candidate) != item["sha256"]:
+                raise ReleaseError("release_file_tampered")
+        bound = files.get("capability_manifest")
+        if bound is not None:
+            expected_hash = bound.get("content_hash")
+            bound_path = Path(bound["path"])
+            inputs = (self.root / "release-inputs").resolve()
+            if bound_path.is_symlink() or inputs not in bound_path.resolve().parents:
+                raise ReleaseError("capability_manifest_invalid")
+            if not isinstance(expected_hash, str) or len(expected_hash) != 64 or any(c not in "0123456789abcdef" for c in expected_hash):
+                raise ReleaseError("capability_manifest_invalid")
+            loaded = _load_capability_manifest(bound_path, code="capability_manifest_invalid")
+            if loaded.content_hash != expected_hash:
+                raise ReleaseError("capability_manifest_invalid")
         if manifest.get("schema_version") == 0:
             raise ReleaseError("test_release_not_activatable")
         if manifest.get("schema_version") not in {1, 2}:
@@ -241,11 +281,49 @@ class ReleaseStore:
             raise ReleaseError("release_profile_harness_mismatch")
         return release_id, manifest, profile
 
+    def _bound_capability_item(self, release_id: str):
+        manifest = self.validate_runtime(release_id)
+        item = manifest.get("files", {}).get("capability_manifest")
+        if item is None:
+            return None
+        path = Path(item["path"])
+        if path.is_symlink():
+            raise ReleaseError("capability_manifest_invalid")
+        inputs = (self.root / "release-inputs").resolve()
+        if inputs not in path.resolve().parents:
+            raise ReleaseError("capability_manifest_invalid")
+        return path, item["content_hash"]
+
+    def capability_manifest_path(self, release_id: str) -> Path | None:
+        """Return the immutable copy bound to this release, or None.
+
+        The path is the release-inputs copy recorded at build. This method
+        does not accept a source path and does not open one.
+        """
+        found = self._bound_capability_item(release_id)
+        return None if found is None else found[0]
+
+    def load_bound_capability_manifest(self, release_id: str):
+        """Load the capability manifest from the immutable copy, or return None.
+
+        None means this release bound no manifest. Callers must not substitute
+        a mutable source file.
+        """
+        found = self._bound_capability_item(release_id)
+        if found is None:
+            return None
+        path, content_hash = found
+        loaded = _load_capability_manifest(path, code="capability_manifest_invalid")
+        if loaded.content_hash != content_hash:
+            raise ReleaseError("capability_manifest_invalid")
+        return loaded
+
 
 def build_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
                          evidence: dict[str, Path], revision: str,
                          activation: str,
                          credential_file: Path | None = None,
+                         capability_manifest: Path | None = None,
                          harnesses=("codex", "hermes", "generic"),
                          _test_unbound: bool = False) -> tuple[str, dict]:
     """Build a deterministic immutable release without activating it."""
@@ -257,6 +335,16 @@ def build_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
     from .runtime import ServiceRuntime
 
     root = Path(root).resolve(); snapshot_root = Path(snapshot_root).resolve()
+    capability_bytes = None
+    capability_sha = None
+    if capability_manifest is not None:
+        source = Path(capability_manifest).expanduser()
+        _load_capability_manifest(source, code="invalid_capability_manifest")
+        try:
+            capability_bytes = source.read_bytes()
+        except OSError as exc:
+            raise ReleaseError("invalid_capability_manifest") from exc
+        capability_sha = hashlib.sha256(capability_bytes).hexdigest()
     credential_path = Path(credential_file).expanduser().resolve() if credential_file else None
     if credential_path is not None:
         try:
@@ -276,6 +364,8 @@ def build_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
             "revision": revision, "harnesses": sorted(harnesses),
             "credential_file": str(credential_path) if credential_path else None,
             "evidence": {name: _digest(Path(path)) for name, path in sorted(evidence.items())}}
+    if capability_sha is not None:
+        seed["capability_manifest_sha256"] = capability_sha
     input_id = hashlib.sha256(_canonical(seed)).hexdigest()
     inputs = root / "release-inputs" / input_id
     inputs.mkdir(parents=True, exist_ok=True)
@@ -292,6 +382,21 @@ def build_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
             try: os.replace(temporary, destination)
             finally: temporary.unlink(missing_ok=True)
         preserved_evidence[name] = destination
+    capability_copy = None
+    if capability_bytes is not None:
+        capability_copy = inputs / "capability-manifest.json"
+        if capability_copy.is_symlink():
+            raise ReleaseError("capability_manifest_invalid")
+        if capability_copy.exists() and capability_copy.read_bytes() != capability_bytes:
+            raise ReleaseError("immutable_release_input_conflict")
+        if not capability_copy.exists():
+            with tempfile.NamedTemporaryFile("wb", dir=inputs, delete=False) as handle:
+                temporary = Path(handle.name); handle.write(capability_bytes); handle.flush(); os.fsync(handle.fileno())
+            try: os.replace(temporary, capability_copy)
+            finally: temporary.unlink(missing_ok=True)
+        copied = _load_capability_manifest(capability_copy, code="invalid_capability_manifest")
+        if _digest(capability_copy) != capability_sha or not copied.content_hash:
+            raise ReleaseError("immutable_release_input_conflict")
     catalog_path = inputs / "catalog.json"
     if catalog_path.exists() and json.loads(catalog_path.read_text()) != catalog:
         raise ReleaseError("immutable_release_input_conflict")
@@ -320,7 +425,7 @@ def build_release(*, root: Path, snapshot_id: str, snapshot_root: Path,
         ServiceRuntime(profile, initialize=True)
     release_id = ReleaseStore(root).create(snapshot_id=snapshot_id, snapshot_root=snapshot_root,
         catalog_path=catalog_path, profiles=profiles, evidence=preserved_evidence, revision=revision,
-        activation=activation, _test_unbound=_test_unbound)
+        activation=activation, capability_manifest=capability_copy, _test_unbound=_test_unbound)
     if _test_unbound:
         return release_id, json.loads((ReleaseStore(root).releases/release_id/"manifest.json").read_text())
     return release_id, ReleaseStore(root).validate(release_id)

@@ -32,7 +32,7 @@ Nested `SKILL.md` files under a package's `skills/` directory are independently 
 
 ## Authority boundary
 
-The canonical warehouse is currently the authoring authority. Notion is a portable distribution mirror and readable index. The page body may be normalized by Notion, but consumers materialize the exact canonical bytes from the verified bundle. Editing a Notion page does not silently modify or override the canonical skill. A future bidirectional authoring workflow must introduce explicit conflict review before changing this rule.
+Global Skills in Notion is the authoring authority. The page body is the effective skill document, Description is the matching text, and Files holds the supporting package. Consumers read only a rebuilt, verified snapshot; they never read Notion live. A local `SKILL.md`, exported-skills tree, or synchronized warehouse copy is preparation or projection state, not an authoring override. Snapshot refresh must validate page content plus every bundled path, hash, byte count, and POSIX mode before promotion.
 
 Generic Notion clients can read the page and attachments but will not automatically unpack this transport bundle. Cross-harness consumers should use the shared `skill-library` adapter, which validates and materializes the standard skill directory before selection.
 

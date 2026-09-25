@@ -305,7 +305,7 @@ def _generated_manifest(row,bundle_data=None):
     bundled=[item for item in row["files"] if item["path"]!="skill-package.json"]
     return json.dumps({"schema_version":1,"stable_id":row["stable_id"],"aliases":row["aliases"],"entrypoint":"SKILL.md",
         "invocation_policy":row["invocation_policy"],"required_runtimes":row["required_runtimes"],
-        "executable_paths":row["executable_paths"],"bundle_attachment":"package-bundle.txt",
+        "executable_paths":row["executable_paths"],"body_source":"page","bundle_attachment":"package-bundle.txt",
         "bundle_sha256":hashlib.sha256(bundle_data).hexdigest(),"bundle_bytes":len(bundle_data),
         "bundle_files":[{key:item[key] for key in ("path","sha256","bytes","mode")} for item in bundled]},sort_keys=True,indent=2).encode()+b"\n"
 

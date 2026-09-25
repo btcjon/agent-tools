@@ -145,17 +145,22 @@ def run_shadow(*, cache_root=None, profile_path=None, cases_path, report_path,
                                  read_allowlist=frozenset(), state_dir=eval_state)
     ServiceRuntime(evaluation_profile, initialize=True)
     if service_factory is SkillAdvisorService:
-        consumed = ServiceRuntime(evaluation_profile).counts().get("provider_attempts", 0)
-        remaining = max(0, profile.provider_attempt_limit - consumed)
-        allowance = min(cases.get("provider_attempt_cap", max_attempts), remaining)
+        allowance = min(cases.get("provider_attempt_cap", max_attempts), profile.provider_attempt_limit)
         if allowance < 1:
             raise ShadowEvalError("provider_attempt_budget_exhausted")
-        evaluation_profile = replace(evaluation_profile, provider_attempt_limit=consumed + allowance)
-    service = service_factory(evaluation_profile)
+        runtime = ServiceRuntime(evaluation_profile, evaluation_id=uuid.uuid4().hex,
+                                 evaluation_limit=allowance)
+        service = SkillAdvisorService(evaluation_profile, runtime=runtime)
+    else:
+        service = service_factory(evaluation_profile)
     results = []; detail = []; counts = {key: 0 for key in ("correct_selections", "abstentions", "misses", "wrong_harness_selections", "disagreements", "provider_failures", "selector_failures")}
     totals = {key: 0 for key in ("provider_attempts", "cache_hits", "input_tokens", "unknown_usage")}; latencies = []
     stopped_reason = None
     for index, case in enumerate(cases["cases"]):
+        cap = cases.get("provider_attempt_cap", max_attempts)
+        if totals["provider_attempts"] >= cap:
+            stopped_reason = "evaluation_provider_attempt_budget"
+            break
         request = {"protocol_version": 1, "request_id": f"shadow-{index}-{uuid.uuid4().hex[:8]}", "session_id": f"notion-shadow-{case_hash[:12]}",
                    "task": case["task"], "context": f"harness={case['harness']}\n{case['context']}", "available_ids": eligible,
                    "explicit_skills": case.get("explicit_skills", [])}
@@ -174,8 +179,9 @@ def run_shadow(*, cache_root=None, profile_path=None, cases_path, report_path,
         if totals["provider_attempts"] > cases.get("provider_attempt_cap", max_attempts): raise ShadowEvalError("provider_attempt_budget_exceeded")
         reason = str(response.get("reason"))
         selector_failure = reason in {"shortlist_overflow", "attempt_budget", "oversized_card_or_request",
-                                      "rank_choice_attempt_budget", "rank_choice_malformed"}
-        provider_failure = (response.get("status") == "incomplete" and not selector_failure) or reason in {"protected_input", "provider_unavailable", "prompt_budget", "absolute_deadline", "worker_failure"} or reason.endswith("provider_failure")
+                                      "rank_choice_attempt_budget", "rank_choice_malformed", "local_provider_attempt_budget",
+                                      "evaluation_provider_attempt_budget"}
+        provider_failure = (response.get("status") == "incomplete" and not selector_failure) or reason in {"protected_input", "provider_unavailable", "prompt_budget", "local_prompt_budget", "absolute_deadline", "worker_failure"} or reason.endswith("provider_failure")
         if selector_failure:
             stopped_reason = "shadow_selector_or_policy_stop:" + reason
             counts["selector_failures"] += 1

@@ -1,6 +1,7 @@
 import io
 import json
 import tarfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -8,6 +9,8 @@ from jev_skill_advisor.library_cache import LibraryCache
 from jev_skill_advisor.notion_import import Export
 from jev_skill_advisor.shadow_eval import ShadowEvalError, run_shadow, write_profile
 from jev_skill_advisor.exposure import detail_selection_audit
+from jev_skill_advisor.profile import load_profile
+from jev_skill_advisor.runtime import ServiceRuntime
 
 
 SKILLS = {
@@ -146,6 +149,43 @@ def test_budget_larger_than_twenty_blocks_calls(tmp_path):
     with pytest.raises(ShadowEvalError, match="shadow_budget_too_large"):
         run_shadow(cache_root=cache, profile_path=profile, cases_path=cases, report_path=tmp_path / "report.json", service_factory=FakeService)
     assert FakeService.calls == 0
+
+
+def test_real_shadow_run_stops_before_spending_past_shared_allowance(tmp_path, monkeypatch):
+    cache, _, profile_path, cases, _ = prepared(tmp_path)
+    case_data = json.loads(cases.read_text())
+    case_data["provider_attempt_cap"] = 1
+    cases.write_text(json.dumps(case_data))
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test-only-key")
+    monkeypatch.setattr("jev_skill_advisor.shadow_eval.uuid.uuid4",
+                        lambda: SimpleNamespace(hex="fixed-evaluation"))
+    profile = load_profile(profile_path)
+    ServiceRuntime(profile, initialize=True)
+    seed = ServiceRuntime(profile, evaluate_fn=lambda payload, key, timeout: ({"answers": {}}, {}),
+                          operation_id="seed", evaluation_id="fixed-evaluation", evaluation_limit=1)
+    seed.evaluator({"seed": 1}, 1)
+
+    report = run_shadow(cache_root=cache, profile_path=profile_path, cases_path=cases,
+                        report_path=tmp_path / "capped-report.json")
+    assert report["run_status"] == "failed"
+    assert report["stopped_reason"] == "shadow_selector_or_policy_stop:evaluation_provider_attempt_budget"
+    assert report["summary"]["provider_attempts"] == 0
+    assert ServiceRuntime(profile).counts()["provider_attempts"] == 1
+
+
+def test_shadow_report_records_budget_stop_between_cases(tmp_path):
+    cache, _, profile_path, cases, _ = prepared(tmp_path)
+    case_data = json.loads(cases.read_text())
+    case_data["provider_attempt_cap"] = 1
+    cases.write_text(json.dumps(case_data))
+    FakeService.calls = 0
+    FakeService.seen = {}
+    report = run_shadow(cache_root=cache, profile_path=profile_path, cases_path=cases,
+                        report_path=tmp_path / "budget-report.json", service_factory=FakeService)
+    assert report["run_status"] == "failed"
+    assert report["stopped_reason"] == "evaluation_provider_attempt_budget"
+    assert report["summary"]["provider_attempts"] == 1
+    assert report["summary"]["case_count"] == 1
 
 
 def test_disagreement_stays_visible(tmp_path):

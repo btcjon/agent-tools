@@ -83,6 +83,99 @@ def _archive_files(export, **kwargs):
     return {name: entry["data"] for name, entry in _archive_entries(export, **kwargs).items()}
 
 
+_PAGE_MARKER = re.compile(r"\n*## Managed skill identity\s*```json\s*\{[^`]+\}\s*```\s*", re.S)
+_PAGE_APPENDIX = "\n## Preserved source metadata"
+
+
+def skill_from_page(data):
+    """Canonical SKILL.md from a Notion page export.
+
+    The export adds a managed marker, a metadata appendix, and Notion frontmatter.
+    Supporting files stay in the package bundle. This keeps the page body.
+    """
+    # Imported here so the selector can load this module on a Python without PyYAML.
+    import yaml
+    # The selector imports this module on a Python that does not have PyYAML.
+    import yaml
+    text = data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    if not text.startswith("---\n"):
+        raise LibraryCacheError("page_skill_missing_frontmatter")
+    end = text.find("\n---\n", 4)
+    if end < 0:
+        raise LibraryCacheError("page_skill_missing_frontmatter")
+    try:
+        meta = yaml.safe_load(text[4:end])
+    except yaml.YAMLError as exc:
+        raise LibraryCacheError("page_skill_invalid_frontmatter") from exc
+    if not isinstance(meta, dict):
+        raise LibraryCacheError("page_skill_invalid_frontmatter")
+    name, description = meta.get("name"), meta.get("description")
+    if not isinstance(name, str) or not isinstance(description, str) or not name.strip() or not description.strip():
+        raise LibraryCacheError("page_skill_missing_name")
+    body = _PAGE_MARKER.sub("\n\n", text[end + 5 :], count=1)
+    extra = {}
+    if _PAGE_APPENDIX in body:
+        body, _, tail = body.partition(_PAGE_APPENDIX)
+        match = re.search(r"```yaml\n(.*?)\n```", tail, re.S)
+        if match:
+            try:
+                loaded = yaml.safe_load(match.group(1)) or {}
+            except yaml.YAMLError as exc:
+                raise LibraryCacheError("page_skill_invalid_metadata") from exc
+            if not isinstance(loaded, dict):
+                raise LibraryCacheError("page_skill_invalid_metadata")
+            extra = loaded
+    body = body.replace("<p>", "").replace("</p>", "")
+    body = re.sub(r"\n{3,}", "\n\n", body).strip() + "\n"
+    front = {key: value for key, value in extra.items() if key not in {"name", "description"}}
+    ordered = {"name": name.strip(), "description": description.strip(), **{key: front[key] for key in sorted(front)}}
+    dumped = yaml.safe_dump(ordered, sort_keys=False, allow_unicode=True).strip()
+    return f"---\n{dumped}\n---\n\n{body}".encode()
+
+
+def reseal_bundle(bundle, manifest, skill_markdown):
+    """Replace the bundle skill body and record that the page is the source."""
+    entries = _archive_entries(Export("skill", "bundle", "0" * 64, bundle), max_files=10_000, max_expanded_bytes=600_000_000)
+    skill_paths = [name for name in entries if PurePosixPath(name).name == "SKILL.md"]
+    if not skill_paths:
+        raise LibraryCacheError("missing_skill_md")
+    target = min(skill_paths, key=lambda name: name.count("/"))
+    entries[target] = {"data": skill_markdown, "mode": entries[target]["mode"]}
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w") as archive:
+        for name in sorted(entries):
+            data = entries[name]["data"]
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            info.mode = entries[name]["mode"]
+            info.mtime = 0
+            info.uid = 0
+            info.gid = 0
+            info.uname = ""
+            info.gname = ""
+            archive.addfile(info, io.BytesIO(data))
+    output = io.BytesIO()
+    with gzip.GzipFile(fileobj=output, mode="wb", mtime=0, filename="") as compressed:
+        compressed.write(raw.getvalue())
+    sealed = output.getvalue()
+    try:
+        package = json.loads(manifest)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise LibraryCacheError("invalid_package_manifest") from exc
+    if not isinstance(package, dict):
+        raise LibraryCacheError("invalid_package_manifest")
+    package["bundle_files"] = [
+        {"bytes": len(entries[name]["data"]), "mode": entries[name]["mode"], "path": name,
+         "sha256": hashlib.sha256(entries[name]["data"]).hexdigest()}
+        for name in sorted(entries)
+    ]
+    package["bundle_bytes"] = len(sealed)
+    package["bundle_sha256"] = hashlib.sha256(sealed).hexdigest()
+    package["body_source"] = "page"
+    return sealed, json.dumps(package, sort_keys=True, indent=2).encode() + b"\n"
+
+
+
 def _skill_roots(files):
     roots = sorted(PurePosixPath(name).parent for name in files if PurePosixPath(name).name == "SKILL.md")
     if not roots:
@@ -109,7 +202,7 @@ def _package_metadata(root, selected, export):
         raise LibraryCacheError("invalid_package_manifest") from exc
     required = {"schema_version", "stable_id", "entrypoint", "invocation_policy"}
     allowed = required | {"aliases", "required_runtimes", "executable_paths", "attachment_paths", "canonical_skill_attachment",
-                          "bundle_attachment","bundle_sha256","bundle_bytes","bundle_files"}
+                          "bundle_attachment","bundle_sha256","bundle_bytes","bundle_files","body_source"}
     if not isinstance(value, dict) or set(value) - allowed or not required <= set(value) or value["schema_version"] != 1:
         raise LibraryCacheError("invalid_package_manifest")
     stable_id = value["stable_id"]
@@ -144,15 +237,20 @@ def _package_metadata(root, selected, export):
     canonical=value.get("canonical_skill_attachment")
     if canonical is not None and (not isinstance(canonical,str) or PurePosixPath(canonical).name!=canonical or canonical not in selected):
         raise LibraryCacheError("invalid_canonical_skill_attachment")
+    body_source=value.get("body_source", "bundle")
+    if body_source not in {"bundle", "page"}: raise LibraryCacheError("invalid_package_manifest")
     bundle=value.get("bundle_attachment")
     if bundle is not None:
         if (not isinstance(bundle,str) or PurePosixPath(bundle).name!=bundle or bundle not in selected or
                 not isinstance(value.get("bundle_sha256"),str) or not isinstance(value.get("bundle_bytes"),int) or
                 not isinstance(bundle_files,list)): raise LibraryCacheError("invalid_bundle_manifest")
-    return {**value, "aliases": aliases, "required_runtimes": runtimes, "executable_paths": executable_paths,
+    value.pop("body_source", None)
+    returned = {**value, "aliases": aliases, "required_runtimes": runtimes, "executable_paths": executable_paths,
             "attachment_paths":attachment_paths,"canonical_skill_attachment":canonical,
             "bundle_attachment":bundle,"bundle_files":bundle_files,
             "entrypoint": entrypoint.as_posix(), "notion_id": export.id, "notion_version_id": export.version_id}
+    if body_source == "page": returned["body_source"] = "page"
+    return returned
 
 
 class LibraryCache:
@@ -251,6 +349,7 @@ class LibraryCache:
                             if source_root in PurePosixPath(name).parents}
                 if "SKILL.md" not in selected:
                     raise LibraryCacheError("missing_skill_md")
+                page_skill = selected["SKILL.md"]
                 package = _package_metadata(source_root, selected, export)
                 bundle=package["bundle_attachment"]
                 if bundle is not None:
@@ -265,6 +364,8 @@ class LibraryCache:
                     if actual!=expected or "SKILL.md" not in entries: raise LibraryCacheError("bundle_content_mismatch")
                     transport_manifest=selected["skill-package.json"]
                     selected={**entries,"skill-package.json":transport_manifest}
+                if package.get("body_source") == "page":
+                    selected["SKILL.md"]={"data":skill_from_page(page_skill["data"]),"mode":selected["SKILL.md"]["mode"]}
                 canonical=package["canonical_skill_attachment"]
                 if canonical is not None: selected["SKILL.md"]=selected.pop(canonical)
                 for exported,original in package["attachment_paths"].items():

@@ -20,6 +20,8 @@ skill-advisor-production = "jev_skill_advisor.production_cli:main"
 skill-library-sync = "jev_skill_advisor.sync_cli:main"
 skill-advisor-release = "jev_skill_advisor.release_cli:main"
 skill-advisor-select = "jev_skill_advisor.select_cli:main"
+skill-advisor-usage = "jev_skill_advisor.usage_cli:main"
+skill-advisor-selector-eval = "jev_skill_advisor.selector_eval:main"
 
 [build-system]
 requires = ["setuptools>=68"]

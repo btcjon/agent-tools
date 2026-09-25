@@ -9,7 +9,8 @@ import unittest
 from pathlib import Path
 
 from jev_skill_advisor.catalog_cli import build_catalog
-from jev_skill_advisor.library_cache import LibraryCache, LibraryCacheError, _archive_files
+from jev_skill_advisor.library_cache import LibraryCache, LibraryCacheError, _archive_files, reseal_bundle, skill_from_page
+import hashlib
 from jev_skill_advisor.notion_import import Export
 
 
@@ -184,6 +185,76 @@ class LibraryCacheTests(unittest.TestCase):
             for snapshot in (first,second):
                 data=json.loads((cache.snapshots/snapshot["snapshot_id"]/"manifest.json").read_text())
                 self.assertEqual(data["packages"][0]["stable_id"],"shared:stable")
+
+
+
+    def test_page_body_survives_a_stale_bundle_when_the_package_follows_the_page(self):
+        page = """---
+name: |-
+  skill-discovery
+description: |-
+  Use Global Skills.
+---
+
+Shared skills live in **Global Skills**.
+
+Update an existing skill before creating another.
+
+## Managed skill identity
+
+```json
+{"stable_id":"warehouse:skill-discovery"}
+```
+
+## Preserved source metadata
+
+The following metadata is part of the canonical skill contract and remains authoritative for this pilot.
+
+```yaml
+{}
+```
+""".encode()
+        stale = b"---\nname: skill-discovery\ndescription: Pilot.\n---\n\nShared skills live in **Jev Skills Pilot**.\n"
+        reference = b"keep-me\n"
+        inner = archive({"SKILL.md": stale, "references/info.txt": reference})
+        sealed_skill = skill_from_page(page)
+        self.assertIn(b"Global Skills", sealed_skill)
+        self.assertNotIn(b"Managed skill identity", sealed_skill)
+        self.assertNotIn(b"Jev Skills Pilot", sealed_skill)
+        manifest = {
+            "schema_version": 1, "stable_id": "warehouse:skill-discovery", "entrypoint": "SKILL.md",
+            "invocation_policy": "source", "bundle_attachment": "package-bundle.txt",
+            "bundle_bytes": len(inner), "bundle_sha256": hashlib.sha256(inner).hexdigest(),
+            "bundle_files": [
+                {"path": "SKILL.md", "sha256": hashlib.sha256(stale).hexdigest(), "bytes": len(stale), "mode": 0o644},
+                {"path": "references/info.txt", "sha256": hashlib.sha256(reference).hexdigest(), "bytes": len(reference), "mode": 0o644},
+            ],
+            "body_source": "page",
+        }
+        files = {
+            "pkg/SKILL.md": page,
+            "pkg/package-bundle.txt": inner,
+            "pkg/skill-package.json": json.dumps(manifest).encode(),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            status = LibraryCache(Path(directory) / "cache").publish([Export("skill", "page-discovery", "a" * 64, archive(files))])
+            root = Path(status["catalog_root"])
+            published = next(root.glob("*/SKILL.md")).read_bytes()
+            self.assertEqual(published, sealed_skill)
+            self.assertEqual(next(root.glob("*/references/info.txt")).read_bytes(), reference)
+        resealed, resealed_manifest = reseal_bundle(inner, json.dumps({key: value for key, value in manifest.items() if key != "body_source"}).encode(), sealed_skill)
+        extracted = _archive_files(Export("skill", "bundle", "0" * 64, resealed))
+        self.assertEqual(extracted["SKILL.md"], sealed_skill)
+        self.assertEqual(extracted["references/info.txt"], reference)
+        self.assertEqual(json.loads(resealed_manifest)["body_source"], "page")
+        plain = {key: value for key, value in manifest.items() if key != "body_source"}
+        plain_files = dict(files)
+        plain_files["pkg/skill-package.json"] = json.dumps(plain).encode()
+        with tempfile.TemporaryDirectory() as directory:
+            status = LibraryCache(Path(directory) / "cache").publish([Export("skill", "page-discovery", "b" * 64, archive(plain_files))])
+            published = next(Path(status["catalog_root"]).glob("*/SKILL.md")).read_bytes()
+            self.assertEqual(published, stale)
+
 
 
 if __name__ == "__main__": unittest.main()

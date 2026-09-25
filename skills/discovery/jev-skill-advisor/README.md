@@ -14,7 +14,7 @@ The payoff and the day-to-day checks are in the [guide](guide/README.md).
 
 ## What you get
 
-- **One place for the whole library:** Notion's Agent Skills API is the shelf. Search **Jev Skills Pilot**. Stop copying skill folders from machine to machine.
+- **One place for the whole library:** Notion's Agent Skills API is the shelf. Search **Global Skills**. Stop copying skill folders from machine to machine.
 - **Harness agnostic:** Codex and Hermes already read the same verified copy. Another harness uses the same Python, JSON, or MCP door.
 - **Jev's speed, not another model loop:** Jev chooses from the whole eligible catalog inside one call. It does not write an essay about which skill to open, and it does not spend a dozen turns searching.
 - **No context-window bill:** the catalog stays out. The task receives one skill body. In the activation checks, that body ran from a few kilobytes to about 16 KB.

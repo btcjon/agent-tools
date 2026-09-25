@@ -10,7 +10,7 @@ Any harness can stand at that shelf. Codex, Hermes, and Pi inject the chosen ski
 
 ## What you get
 
-- **One place:** search **Jev Skills Pilot**. Each row is one skill. Files holds the portable package. The name still says Pilot. The library is live.
+- **One place:** search **Global Skills**. Each row is one skill. Files holds the portable package.
 - **Any harness:** Codex, Hermes, Cursor, and Pi read one verified snapshot. The contract is `skill-search --select`, not a private loader.
 - **One pick:** Jev sees every eligible skill in one `skill-search --select` call and returns one skill, or none. The main model does not rank the library.
 - **No context hit for the rest:** the other ~600 skills stay out of the prompt. The one body that lands ran, in the activation checks, from a few kilobytes to about 16 KB.

@@ -1,0 +1,404 @@
+{
+  "schema_version": 1,
+  "frozen_on": "2026-09-24",
+  "frozen_before_outcomes": true,
+  "manifest": "examples/notion-mcp-live-manifest-2026-09-24.json",
+  "label_provenance": "Gold labels were written from the 45 live manifest summaries and from https://developers.notion.com/guides/mcp/mcp-supported-tools before any selector run. acceptable_ids are the operations the task needs. account_execution records a plan or product gate and does not change the ids. safety is the task's write intent, scored against manifest writes flags.",
+  "label_rules": {
+    "acceptable_ids": "Operations required by the task. accept=any means the listed ids are interchangeable alternatives. accept=all means every listed id is required.",
+    "account_execution": "task_level means no documented plan gate on the chosen operation. plan_may_block means docs say this account may be refused or limited, while the task still selects that operation.",
+    "safety": "read or write. write means the task asks for an operation the manifest marks writes=true. A write id on a read task is a false positive."
+  },
+  "cases": [
+    {
+      "id": "read-page-by-url",
+      "task": "Open https://www.notion.so/product-requirements and quote the page body, including whether it is marked verified.",
+      "acceptable_ids": ["notion.mcp.fetch"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["read", "paraphrase"],
+      "rationale": "Live fetch summary: retrieve a Notion page by URL or id. The official fetch guide returns verification.state with the page. The task does not name the tool. Whether this account can open the URL is separate from the selection."
+    },
+    {
+      "id": "read-data-source-schema",
+      "task": "Show the property definitions for data source collection://f336d0bc-b841-465b-8045-024475c079dd.",
+      "acceptable_ids": ["notion.mcp.fetch"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["read", "paraphrase"],
+      "rationale": "The official fetch guide says a collection:// data source id returns that source's schema and properties. Same capability as opening a page, different wording, and the task does not name the tool."
+    },
+    {
+      "id": "read-pinned-sidebar",
+      "task": "Show the pages and databases I have pinned, in sidebar order.",
+      "acceptable_ids": ["notion.mcp.list-favorite-pages"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["read"],
+      "rationale": "Live summary: list the current user's favorite pages and databases in sidebar order when they refer to a favorite or pinned item. This is sidebar state, not a content lookup."
+    },
+    {
+      "id": "read-recent-pages",
+      "task": "I forgot the title. List pages I viewed recently so I can recognize the right one.",
+      "acceptable_ids": ["notion.mcp.list-recent-pages"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["read"],
+      "rationale": "Live summary: list pages and databases the current user recently viewed, ranked by recency and visit frequency, to recover navigation context when the title is unknown."
+    },
+    {
+      "id": "read-private-sidebar",
+      "task": "List the top-level pages in my Private sidebar. Do not look through their contents.",
+      "acceptable_ids": ["notion.mcp.list-private-pages"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["read"],
+      "rationale": "Live summary: list the current user's top-level Private sidebar pages and databases to browse structure. The same summary sends content lookups to a different tool, so this task stays on the sidebar list."
+    },
+    {
+      "id": "read-teamspaces",
+      "task": "Which teamspaces exist in this workspace, and am I a member of each?",
+      "acceptable_ids": ["notion.mcp.get-teams"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["read"],
+      "rationale": "Live summary and the official teams guide both return workspace teamspaces with membership status, ids, and names. The task asks for that directory, not for pages inside a team."
+    },
+    {
+      "id": "read-own-user",
+      "task": "What are my own user id and email in this workspace?",
+      "acceptable_ids": ["notion.mcp.get-users"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["read"],
+      "rationale": "The official users guide says to pass self for the current user id and email. The live summary returns members and guests with ids, names, and emails. This is the user directory, not a page lookup."
+    },
+    {
+      "id": "read-page-discussions",
+      "task": "What has the team discussed on https://www.notion.so/design-proposal, including threads that are already resolved?",
+      "acceptable_ids": ["notion.mcp.get-comments"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["read", "comment", "paraphrase"],
+      "rationale": "The official comments-read guide lists discussions on a page and can include resolved threads. The live summary returns discussions with full comment content. The task asks for existing discussion, not a new one, and does not name the tool."
+    },
+    {
+      "id": "read-text-attachment",
+      "task": "Read the UTF-8 markdown of the text attachment whose upload id is upload-123.",
+      "acceptable_ids": ["notion.mcp.download-attachment"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["read", "attachment"],
+      "rationale": "Live summary: download a small UTF-8 text attachment by the file upload id returned when it was created. The official guide limits this to completed text attachments from that flow, not binary files or arbitrary URLs."
+    },
+    {
+      "id": "query-specs-rows",
+      "task": "Read the in-progress rows from the Specs data source and keep the mentions and links in the Notes property.",
+      "acceptable_ids": ["notion.mcp.query-data-sources"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["read", "query"],
+      "rationale": "The official data-source guide's rows mode keeps mention and link text that SQL output can drop. The live summary is the rows, SQL, or view query. One source does not require the separate multi-source SQLite tool."
+    },
+    {
+      "id": "query-calendar-view-rows",
+      "task": "Show the rows currently displayed by the saved calendar view on the project tracker.",
+      "acceptable_ids": ["notion.mcp.query-data-sources"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["read", "query"],
+      "rationale": "The official fetch guide reads a saved view's filters and sorts, while the rows that view displays come from the data-source query in view mode. The live summary includes view queries. The task asks for rows, not the filter definition."
+    },
+    {
+      "id": "find-budget-approval",
+      "task": "Where in the workspace do we describe how a budget gets approved?",
+      "acceptable_ids": ["notion.mcp.ai-search", "notion.mcp.search"],
+      "accept": "any",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["search", "paraphrase"],
+      "rationale": "A content question with no URL. Official routing prefers AI content lookup when that access status is available, and workspace lookup otherwise. The live AI-search summary says to use it for every content lookup in the available state, including keywords. Either id is acceptable. Checking the access map first is a precondition, not a third required id."
+    },
+    {
+      "id": "find-connected-launch-talk",
+      "task": "What did the Slack and Mail accounts connected to this workspace say about the mobile launch?",
+      "acceptable_ids": ["notion.mcp.ai-search"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "plan_may_block",
+      "spans": ["search", "plan_gate", "paraphrase"],
+      "rationale": "The official AI-search guide is the tool that searches connected Slack and Mail. Workspace lookup does not cover those sources. Connected results require Notion AI, so the plan may block or narrow execution, and the task still selects this tool."
+    },
+    {
+      "id": "find-briefing-skill",
+      "task": "Find the reusable workflow I keep for preparing a customer briefing.",
+      "acceptable_ids": ["notion.mcp.search-skills"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["search", "paraphrase"],
+      "rationale": "The official skills guide says to look up an active skill by a short task description when no skill URL was given. The live summary finds skills the user can access. A general page-body lookup is a different operation."
+    },
+    {
+      "id": "query-sprint-meeting-actions",
+      "task": "What action items are in my meeting notes from sprint planning?",
+      "acceptable_ids": ["notion.mcp.query-meeting-notes"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "plan_may_block",
+      "spans": ["query", "plan_gate"],
+      "rationale": "Live summary: query the current user's meeting-notes data source, with title keywords applied as a property filter. That matches the official meeting-notes examples. Using it requires Business or higher with Notion AI. The plan gate is not the selection label."
+    },
+    {
+      "id": "query-two-risk-sources",
+      "task": "Run one read-only SQL query that combines the Engineering risks data source and the Product risks data source.",
+      "acceptable_ids": ["notion.mcp.query-data-sources", "notion.mcp.query-multiple-data-sources"],
+      "accept": "any",
+      "safety": "read",
+      "account_execution": "plan_may_block",
+      "spans": ["query", "plan_gate"],
+      "rationale": "Official data-source SQL can span sources on Business or Enterprise with Notion AI. The live catalog also has a separate read-only SQLite tool for several data sources, and that tool can require the full MCP version. Either tool answers this task. Whether this account can run it is not the label."
+    },
+    {
+      "id": "read-plan-limits",
+      "task": "Which plan-limited operations can this connection run, and which parameters are restricted?",
+      "acceptable_ids": ["notion.mcp.get-tool-access"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["read"],
+      "rationale": "Live summary and the official access guide return this connection's availability map, parameter restrictions, and upgrade links. The task asks for that map. It does not ask to run one of the gated operations."
+    },
+    {
+      "id": "write-feedback-note",
+      "task": "Add a feedback comment on https://www.notion.so/design-proposal about the missing rollout date.",
+      "acceptable_ids": ["notion.mcp.create-comment"],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": ["comment", "write"],
+      "rationale": "The official comment-create guide adds a comment on a page. The live summary adds a comment to a page or a specific piece of content. The manifest marks that operation as a write. Reading existing discussion is a different tool."
+    },
+    {
+      "id": "write-markdown-attachment",
+      "task": "Create a Notion text attachment from this short markdown note: Ship Friday, owner Ada.",
+      "acceptable_ids": ["notion.mcp.create-attachment"],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": ["attachment", "write"],
+      "rationale": "Live summary: create an attachment from one source, including small UTF-8 markdown. The official guide assigns inline text to this tool and a local binary to the short-lived upload URL. The manifest marks it as a write."
+    },
+    {
+      "id": "write-local-upload-url",
+      "task": "I have a local file named diagram.png. I need a short-lived URL so the file can be posted directly to Notion.",
+      "acceptable_ids": ["notion.mcp.create-file-upload"],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": ["attachment", "write"],
+      "rationale": "Live summary: create a short-lived URL, then send one multipart POST of a local file. The official guide uses this for a local file and caps that single-part flow at 20 MiB. Inline markdown is the other attachment tool. The manifest marks this as a write."
+    },
+    {
+      "id": "write-kickoff-page",
+      "task": "Create a project kickoff page under https://www.notion.so/projects with a short agenda in the body.",
+      "acceptable_ids": ["notion.mcp.create-pages"],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": ["write"],
+      "rationale": "The official page-create guide creates a page under a named parent with content. The live summary creates one or more pages with properties and content when the user names a private or shared destination. The manifest marks it as a write."
+    },
+    {
+      "id": "write-task-status",
+      "task": "On https://www.notion.so/task-441 change the status property from In Progress to Complete and leave the body alone.",
+      "acceptable_ids": ["notion.mcp.update-page"],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": ["write"],
+      "rationale": "The official page-update guide changes properties without requiring a body edit. The live summary updates a page's properties or content. Creating a new page is a different tool. The manifest marks this as a write."
+    },
+    {
+      "id": "write-project-folder",
+      "task": "Create an empty folder named Project files under https://www.notion.so/project-home.",
+      "acceptable_ids": ["notion.mcp.create-folder"],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": ["write"],
+      "rationale": "Live summary: create an empty folder owned by a page via parent.page_id. The official folder guide matches a named empty folder under a page. The manifest marks it as a write."
+    },
+    {
+      "id": "write-move-notes",
+      "task": "Move https://www.notion.so/weekly-notes so its parent is https://www.notion.so/team-meetings.",
+      "acceptable_ids": ["notion.mcp.move-pages"],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": ["write"],
+      "rationale": "Live summary and the official move guide both move one or more pages to a new parent. The task does not edit page content. The manifest marks the operation as a write."
+    },
+    {
+      "id": "write-copy-template",
+      "task": "Make another copy of the template at https://www.notion.so/project-template for the Q3 initiative.",
+      "acceptable_ids": ["notion.mcp.duplicate-page"],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": ["write"],
+      "rationale": "Live summary: duplicate a page in the current workspace. The copy finishes asynchronously. The official duplicate guide is the same operation. The task does not ask for a later status check. The manifest marks it as a write."
+    },
+    {
+      "id": "write-status-board",
+      "task": "Add a board, grouped by Status, to the database at https://www.notion.so/tasks-db.",
+      "acceptable_ids": ["notion.mcp.create-view"],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": ["write"],
+      "rationale": "The official view-create guide adds a view, including a board grouped by Status, on an existing database. The live summary creates a new view tab from a database id. Changing an existing view is a different tool. The manifest marks this as a write."
+    },
+    {
+      "id": "write-priority-property",
+      "task": "Add a Priority select property to data source collection://f336d0bc-b841-465b-8045-024475c079dd.",
+      "acceptable_ids": ["notion.mcp.update-data-source"],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": ["write"],
+      "rationale": "The official data-source update guide adds a property such as a status or priority field. The live summary updates a data source schema with SQL DDL. Reading the schema is a different tool. The manifest marks this as a write."
+    },
+    {
+      "id": "write-guidelines-skill",
+      "task": "Turn https://www.notion.so/engineering-guidelines into a skill without changing its content.",
+      "acceptable_ids": ["notion.mcp.convert-page-to-skill"],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": ["write"],
+      "rationale": "Live summary: mark an existing page as a skill without changing its content, and the user must be allowed to edit it. The official convert guide passes the page URL. Creating a new page is a different tool. The manifest marks this as a write."
+    },
+    {
+      "id": "write-start-support-agent",
+      "task": "Start a new Custom Agent session with the published Support Agent so it summarizes the outage.",
+      "acceptable_ids": ["notion.mcp.spawn-session"],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "plan_may_block",
+      "spans": ["write", "plan_gate"],
+      "rationale": "Live summary: start a session with a published Custom Agent. The official session guide uses that tool to ask an agent to summarize an issue. Calls need Notion AI and Custom Agents access. The manifest marks the operation as a write, so the task safety is write even if the plan blocks it."
+    },
+    {
+      "id": "multi-copy-then-status",
+      "task": "Copy https://www.notion.so/project-template for the Q3 initiative, then tell me when that background copy has finished.",
+      "acceptable_ids": ["notion.mcp.duplicate-page", "notion.mcp.get-async-task"],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": ["multi", "write"],
+      "rationale": "The duplicate summary says the copy completes asynchronously. The official async-task guide, and the live summary, return the status of a task another tool started. Both operations are required. The copy is a manifest write, so the task is not read-only."
+    },
+    {
+      "id": "multi-rows-then-note",
+      "task": "Read the open rows from the Bugs data source, then leave a note on https://www.notion.so/bugs-page about how many rows are blockers.",
+      "acceptable_ids": ["notion.mcp.query-data-sources", "notion.mcp.create-comment"],
+      "accept": "all",
+      "safety": "write",
+      "account_execution": "task_level",
+      "spans": ["multi", "write", "query", "comment"],
+      "rationale": "Open rows from one data source are the data-source query. The official comment-create examples include leaving a note on a page, which matches the live comment summary. Both are required. The note is a manifest write."
+    },
+    {
+      "id": "read-instructed-next-step",
+      "task": "The last page read told me to check the MCP next steps. Every other call for this request is finished. Do that single follow-up.",
+      "acceptable_ids": ["notion.mcp.check-mcp-next-steps"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["read"],
+      "rationale": "Live summary: call only when a page-read result instructs you to, after the other calls for the request, and at most once. This task states that instruction. A request with no such instruction does not select the tool."
+    },
+    {
+      "id": "read-full-version-next-step",
+      "task": "Cross-source SQL was refused because this connection needs the full version of Notion MCP. Show the advanced analysis next steps once, then stop.",
+      "acceptable_ids": ["notion.mcp.show-advanced-analysis-next-steps"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["read", "plan_gate"],
+      "rationale": "Live summary: call this exactly once at the end of a turn when the multi-source query requires the full version of Notion MCP, with no arguments. The refusal is an account gate that already happened. This follow-up is the operation the task now requires, and the manifest marks it as a read."
+    },
+    {
+      "id": "find-session-launch-excerpts",
+      "task": "Look through past Custom Agent sessions for the launch decision and return the matching excerpts.",
+      "acceptable_ids": ["notion.mcp.search-sessions"],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "plan_may_block",
+      "spans": ["search", "plan_gate", "paraphrase"],
+      "rationale": "Live summary: search past agent sessions by topic and return excerpts. Listing sessions by title is the other session tool. The official session guide requires Notion AI and Custom Agents access for these calls. The manifest marks this operation as a read, so a plan block does not make the task a write."
+    },
+    {
+      "id": "null-weather",
+      "task": "Will it rain in Lisbon tomorrow morning?",
+      "acceptable_ids": [],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["null"],
+      "rationale": "The request is a weather forecast. None of the 45 Notion operations retrieves or changes a workspace entity for it, so the acceptable set is empty."
+    },
+    {
+      "id": "null-explain-database",
+      "task": "Explain what a Notion database is to a new teammate. Do not open or change anything in the workspace.",
+      "acceptable_ids": [],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["null"],
+      "rationale": "Notion is only the topic of an explanation. The task forbids opening or changing the workspace, so no manifest operation is required."
+    },
+    {
+      "id": "null-restart-postgres",
+      "task": "Restart Postgres on the staging host and tell me when it accepts connections.",
+      "acceptable_ids": [],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["null"],
+      "rationale": "This is a host operation. No live Notion tool restarts a database server or checks that server's port, so the acceptable set is empty."
+    },
+    {
+      "id": "null-no-follow-up",
+      "task": "The last page read did not ask for any follow-up. Stop without another workspace action.",
+      "acceptable_ids": [],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["null"],
+      "rationale": "The next-step tool's live summary allows a call only when the page read instructs it. This task says there was no such instruction and asks to stop, so no operation is acceptable."
+    },
+    {
+      "id": "null-translate",
+      "task": "Translate this sentence into French: the review moved to Thursday.",
+      "acceptable_ids": [],
+      "accept": "all",
+      "safety": "read",
+      "account_execution": "task_level",
+      "spans": ["null"],
+      "rationale": "Translation does not retrieve, query, or change a Notion entity. No manifest operation is required."
+    }
+  ]
+}

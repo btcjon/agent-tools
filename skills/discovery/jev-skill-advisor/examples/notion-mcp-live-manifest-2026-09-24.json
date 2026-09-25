@@ -1,0 +1,456 @@
+{
+  "manifest_version": 1,
+  "description": "Live Notion MCP pins from dest Hermes OAuth tools/list. Ids and one-line summaries only.",
+  "entries": [
+    {
+      "id": "notion.mcp.ai-search",
+      "server": "notion",
+      "operation": "notion-ai-search",
+      "summary": "Use this tool for every content search when access discovery reports current_tool_access.ai_search.status=\"available\". This includes exact keywords, page",
+      "writes": false,
+      "schema_hash": "8c9ecd12c5623570d5642801b2ea35a288a74caa64b32cb23104e5490655906f",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.check-mcp-next-steps",
+      "server": "notion",
+      "operation": "notion-check-mcp-next-steps",
+      "summary": "When to call: Only when a Notion fetch result instructs you to. Finish all Notion tool calls needed for the current request, then call at most once with no",
+      "writes": false,
+      "schema_hash": "5312544d68192754c539c4ce76c5ed31531884e9a0ade53ce279f5ab630202ca",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.convert-page-to-skill",
+      "server": "notion",
+      "operation": "notion-convert-page-to-skill",
+      "summary": "Mark an existing Notion page as a skill without changing its content. The page must be in the current workspace, and the authenticated user must have",
+      "writes": true,
+      "schema_hash": "70f9237badd1fce10541c3f33b868c6fb288d9852f82af24d758b60163092eaf",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.create-attachment",
+      "server": "notion",
+      "operation": "notion-create-attachment",
+      "summary": "Create an attachment and upload it to Notion. Provide exactly one source: - content for small UTF-8 text artifacts such as HTML, Markdown, plain text, CSV,",
+      "writes": true,
+      "schema_hash": "202a8ac789c530c0455173d220bc7272ad906a187b03b0d9ddd76ac5898f7ca2",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.create-comment",
+      "server": "notion",
+      "operation": "notion-create-comment",
+      "summary": "Add a comment to a page or specific content. Provide `page_id` to identify the page, then choose ONE targeting mode: - `page_id` alone: Add a top-level",
+      "writes": true,
+      "schema_hash": "71c2995df34ac5413316544cb691277658b3bbcafa6687cd6917ffea7a9e9bb3",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.create-database",
+      "server": "notion",
+      "operation": "notion-create-database",
+      "summary": "Creates a new Notion database using SQL DDL syntax, or a canonical typed database for tasks, projects, or skills. Provide exactly one of: - schema: a CREATE",
+      "writes": true,
+      "schema_hash": "3a68dd1fe21634c6c23e2372761a5018423af1643b34367ee2384a4623891372",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.create-file-upload",
+      "server": "notion",
+      "operation": "notion-create-file-upload",
+      "summary": "Create a short-lived URL for uploading one local file directly to Notion. After calling this tool, send exactly one multipart/form-data POST request to",
+      "writes": true,
+      "schema_hash": "29acd87f7de02d92e2b888e1486a449a81594d5095b16b891571d724198e2806",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.create-folder",
+      "server": "notion",
+      "operation": "notion-create-folder",
+      "summary": "Creates an empty Notion Folder. Set parent.page_id for a top-level Folder owned by a page, or parent.folder_id to create a nested Folder inside another",
+      "writes": true,
+      "schema_hash": "86aa7baf60aa10b11a9d44e404caf68ffd69a02aa91c210840e52ad003c40660",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.create-pages",
+      "server": "notion",
+      "operation": "notion-create-pages",
+      "summary": "## Overview Creates one or more Notion pages, with the specified properties and content. ## Parent If the user explicitly names a private or shared",
+      "writes": true,
+      "schema_hash": "21f86576cb8b115c11be7d7cfae1b8ed4bfba29bf3beb27cd96b8b63d717c860",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.create-view",
+      "server": "notion",
+      "operation": "notion-create-view",
+      "summary": "Create a new view on a Notion database. Exactly one of \"database_id\" or \"parent_page_id\" must be provided: - \"database_id\": add a new view tab to an existing",
+      "writes": true,
+      "schema_hash": "dc3be406278ebf89bee7d3371ab880804a1ecc9bcf3e6fa99ecdfe2c824525f6",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.download-attachment",
+      "server": "notion",
+      "operation": "notion-download-attachment",
+      "summary": "Download the contents of a small UTF-8 text attachment created by the Notion MCP `create-attachment` tool. Pass the `file_upload_id` returned by",
+      "writes": false,
+      "schema_hash": "3ad261943cee89108acc000a2c6d26c4bb30ab51d69a6ad54c18d0e6c703593a",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.download-skill",
+      "server": "notion",
+      "operation": "notion-download-skill",
+      "summary": "Download a spec-compliant Notion Skill as a complete tar.gz archive containing SKILL.md and its supporting files and nested folders. Pass the skill page ID.",
+      "writes": false,
+      "schema_hash": "e3ce2fb3deadb03f7eb3aff9b387e84e45e60fe6554b15ce4d59fd885f4cb117",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.duplicate-page",
+      "server": "notion",
+      "operation": "notion-duplicate-page",
+      "summary": "Duplicate a Notion page. The page must be within the current workspace, and you must have permission to access it. The duplication completes asynchronously,",
+      "writes": true,
+      "schema_hash": "b4a5f30b68cf291ae9d9ff10471e699f2eb400992c3f88a35832fd4c77be2ce8",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.fetch",
+      "server": "notion",
+      "operation": "notion-fetch",
+      "summary": "Retrieves details about a Notion entity (page, database, data source, or saved database view) by URL or ID. Provide URL or ID in `id` parameter. Make multiple",
+      "writes": false,
+      "schema_hash": "08f8665daf397285150b4e6a89c632e75320cec61c083d26af1d44dfee0857a5",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.get-async-task",
+      "server": "notion",
+      "operation": "notion-get-async-task",
+      "summary": "Retrieves the current status of an async task that was started by another tool (for example, \"create_pages\" called with \"allow_async\": true). The status is",
+      "writes": false,
+      "schema_hash": "ba3023eb1ba66d4deefa8361d1e1cd30aec5c2cd978c171a3b32a73104770850",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.get-comments",
+      "server": "notion",
+      "operation": "notion-get-comments",
+      "summary": "Get comments and discussions from a Notion page. Returns discussions with full comment content in XML format. By default, returns page-level discussions only.",
+      "writes": false,
+      "schema_hash": "6dd707e3933ac635b66ed1f5bc167d03e430197d30eced756260c52a74149639",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.get-session-status",
+      "server": "notion",
+      "operation": "notion-get-session-status",
+      "summary": "Get the latest turn's status for a Custom Agent session without waiting. If availability is not already known for this connection, call get_tool_access with",
+      "writes": false,
+      "schema_hash": "236891bd9bd1b7d1d3edad00b3cf6dc730b7973c50b49f4db352499867cb91ba",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.get-teams",
+      "server": "notion",
+      "operation": "notion-get-teams",
+      "summary": "Retrieves a list of teams (teamspaces) in the current workspace. Shows which teams exist, user membership status, IDs, names, and roles. Teams are returned",
+      "writes": false,
+      "schema_hash": "d2a18f15a74b07af5d3b735ab3945e31c55183a8ecd12b10e6caeab9a11d86d9",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.get-tool-access",
+      "server": "notion",
+      "operation": "notion-get-tool-access",
+      "summary": "Get current tool availability, parameter restrictions, and available upgrade links for this Notion connection. Call with to get the full access map before",
+      "writes": false,
+      "schema_hash": "839f68ab5ef5d2c8d73c7c1286a2b4b0e209529b2d3d85f65879390beb7549ba",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.get-users",
+      "server": "notion",
+      "operation": "notion-get-users",
+      "summary": "Retrieves a list of users in the current workspace. Shows workspace members and guests with their IDs, names, emails (if available), and types (person or",
+      "writes": false,
+      "schema_hash": "039a4d8f89e8400b12e8d0dfbb783b60984f39bcbe58a58dedf4c90edbf97bfa",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.list-favorite-pages",
+      "server": "notion",
+      "operation": "notion-list-favorite-pages",
+      "summary": "List the current user's favorite pages and databases in sidebar order. Use this when the user refers to a favorite or pinned workspace item. Follow cursor",
+      "writes": false,
+      "schema_hash": "44fe756ed8392cbfd519e972c7db3be68b0a928c47395e52d255eeabfd45f8ea",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.list-private-pages",
+      "server": "notion",
+      "operation": "notion-list-private-pages",
+      "summary": "List the current user's top-level pages and databases in their Private sidebar section. Use this to browse private workspace structure. For content searches,",
+      "writes": false,
+      "schema_hash": "44fe756ed8392cbfd519e972c7db3be68b0a928c47395e52d255eeabfd45f8ea",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.list-recent-pages",
+      "server": "notion",
+      "operation": "notion-list-recent-pages",
+      "summary": "List pages and databases the current user recently viewed, ranked by recency and visit frequency. Use this to recover likely navigation context when the user",
+      "writes": false,
+      "schema_hash": "44fe756ed8392cbfd519e972c7db3be68b0a928c47395e52d255eeabfd45f8ea",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.list-session-events",
+      "server": "notion",
+      "operation": "notion-list-session-events",
+      "summary": "List short summaries of saved events in a Custom Agent session. If availability is not already known for this connection, call get_tool_access with before",
+      "writes": false,
+      "schema_hash": "c516e934919baba82453129f4f876969270af11549d1a639a4647d69cfbd3bd3",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.list-shared-pages",
+      "server": "notion",
+      "operation": "notion-list-shared-pages",
+      "summary": "List pages and databases in the current user's Shared sidebar section. Use this to browse content shared directly with the user. For content searches,",
+      "writes": false,
+      "schema_hash": "44fe756ed8392cbfd519e972c7db3be68b0a928c47395e52d255eeabfd45f8ea",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.move-pages",
+      "server": "notion",
+      "operation": "notion-move-pages",
+      "summary": "Move one or more Notion pages or databases to a new parent.",
+      "writes": true,
+      "schema_hash": "4d99d1849413b1649741784f4d23efafb473606f5cc237d31a1595f50ccda261",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.query-data-sources",
+      "server": "notion",
+      "operation": "notion-query-data-sources",
+      "summary": "Query Notion data sources using faithful structured rows, SQL, or a view. This is the canonical replacement for the deprecated query_database_view tool. If",
+      "writes": false,
+      "schema_hash": "74bf23aab84bd744838ab90d94efaf8593a37b54b8f35fbef06f5b4767e9d84a",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.query-meeting-notes",
+      "server": "notion",
+      "operation": "notion-query-meeting-notes",
+      "summary": "Query the current user's meeting notes data source. Applies a filter over meeting note properties. Title keyword searching is done via filter on property",
+      "writes": false,
+      "schema_hash": "62db6675a71af491352ba13772ed57b11e4393954747c3e325fce6ceed8890ea",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.query-multiple-data-sources",
+      "server": "notion",
+      "operation": "notion-query-multiple-data-sources",
+      "summary": "Query data across multiple Notion data sources using read-only SQLite SQL. If availability is not already known for this connection, call get_tool_access with",
+      "writes": false,
+      "schema_hash": "17f98205ebe81f012bf31a6e63abd0ef4d426b7200023c21095b4775162df537",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.query-sessions",
+      "server": "notion",
+      "operation": "notion-query-sessions",
+      "summary": "List agent sessions available to the integration. Filter, sort, or search by title. A bounded page can be empty while has_more is true; follow next_cursor",
+      "writes": false,
+      "schema_hash": "9fda38fa15d87af197886532ccf270d9caf89ed3e03c383fdcafd3c6b612add7",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.read-session-event",
+      "server": "notion",
+      "operation": "notion-read-session-event",
+      "summary": "Read the full visible content of one saved Custom Agent session event. If availability is not already known for this connection, call get_tool_access with",
+      "writes": false,
+      "schema_hash": "1bd162fee86642c309283798e9b5ca6dd3fb30d990cc6a217d0123cd467a2784",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.search",
+      "server": "notion",
+      "operation": "notion-search",
+      "summary": "Before the first content search for this connection, call get_tool_access with unless its current access result is already in context. Choose the",
+      "writes": false,
+      "schema_hash": "22d81ba5f23c04b6d787ce05f8a853905d1795cd5097d788eb00a8e7a7c9b085",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.search-agents",
+      "server": "notion",
+      "operation": "notion-search-agents",
+      "summary": "Search agents by name or description, or browse the current user's favorite agents and the workspace's newest agents. Queries return one page. Without a",
+      "writes": false,
+      "schema_hash": "0fc0f58dc5f8a30da672ab64f42dba4c509252309b5bb43ac93768a3219009eb",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.search-sessions",
+      "server": "notion",
+      "operation": "notion-search-sessions",
+      "summary": "Search past agent sessions by topic in a periodically refreshed index and return matching session URLs and excerpts. Recently created or updated sessions may",
+      "writes": false,
+      "schema_hash": "1cab6b1c46aa2b7bf68200b58a61f3c7c1405eddd74aad1559a342eb530a7238",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.search-skills",
+      "server": "notion",
+      "operation": "notion-search-skills",
+      "summary": "Find active Notion Skills the authenticated user can access. A Skill is a user-owned Notion page with task-scoped instructions that an assistant can write and",
+      "writes": false,
+      "schema_hash": "6d02d454f4067abbd5d58e96c088ff1eefd8cc28f67ef1908ed11d481bda9feb",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.send-message-to-session",
+      "server": "notion",
+      "operation": "notion-send-message-to-session",
+      "summary": "Send a follow-up message to a Custom Agent session you can access. If availability is not already known for this connection, call get_tool_access with before",
+      "writes": true,
+      "schema_hash": "904202caa7f26a449093ce0bc089231a148434c22274f381a89abcd7ca9779fa",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.show-advanced-analysis-next-steps",
+      "server": "notion",
+      "operation": "notion-show-advanced-analysis-next-steps",
+      "summary": "Use this exactly once at the end of a turn when query_multiple_data_sources requires the full version of Notion MCP. Call with no arguments. Do not call this",
+      "writes": false,
+      "schema_hash": "5312544d68192754c539c4ce76c5ed31531884e9a0ade53ce279f5ab630202ca",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.spawn-session",
+      "server": "notion",
+      "operation": "notion-spawn-session",
+      "summary": "Start a session with a published Custom Agent. Use get_session_status or wait_session to check its progress. If availability is not already known for this",
+      "writes": true,
+      "schema_hash": "e3a88df487f0c3d95b77f22ee3457a7cd2d6b53dda0a887b8bd2324cfc1af320",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.stop-session",
+      "server": "notion",
+      "operation": "notion-stop-session",
+      "summary": "Stop a running Custom Agent session you can access. If availability is not already known for this connection, call get_tool_access with before using this",
+      "writes": true,
+      "schema_hash": "236891bd9bd1b7d1d3edad00b3cf6dc730b7973c50b49f4db352499867cb91ba",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.update-data-source",
+      "server": "notion",
+      "operation": "notion-update-data-source",
+      "summary": "Update a Notion data source's schema, title, or attributes using SQL DDL statements. Returns Markdown showing updated structure and schema. Accepts a data",
+      "writes": true,
+      "schema_hash": "c4fa6ad79cffb9d8cef91885c312fa4e07b68629bfc704b82b383b66d1dca0af",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.update-folder",
+      "server": "notion",
+      "operation": "notion-update-folder",
+      "summary": "Update an existing Notion Folder with an explicit Folder operation. - Use add_files with file upload IDs returned by the upload tools. - Fetch the Folder",
+      "writes": true,
+      "schema_hash": "daecf06073ec6cfc66d64a1855df57a42701732bef7d9e230410bfbc2e916937",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.update-page",
+      "server": "notion",
+      "operation": "notion-update-page",
+      "summary": "## Overview Update a Notion page's properties or content. ## Properties Notion page properties are a JSON map of property names to SQLite values. For pages in",
+      "writes": true,
+      "schema_hash": "bac3d2dd377af72283fe111e9f9fccd52157c183676d65b2fd7acc1215bc4ef2",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.update-view",
+      "server": "notion",
+      "operation": "notion-update-view",
+      "summary": "Update a view's name, filters, sorts, or display configuration. Use \"fetch\" to get view IDs from database responses. Only include fields you want to change.",
+      "writes": true,
+      "schema_hash": "e610f39a2850f882a39002194f31403dbe1ba0e500b48a4531ccc6a2ca2dfff7",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.upload-skill",
+      "server": "notion",
+      "operation": "notion-upload-skill",
+      "summary": "Import a spec-compliant Agent Skills directory into a page in a Skills database. First call action=prepare with page_id and the exact tar.gz content_length",
+      "writes": true,
+      "schema_hash": "f736ce5d8a91d98781f962e1d9d81d15be104135e5064e1b7bf9393b58a0dd67",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    },
+    {
+      "id": "notion.mcp.wait-session",
+      "server": "notion",
+      "operation": "notion-wait-session",
+      "summary": "Wait for the latest turn in a Custom Agent session to stop running. If availability is not already known for this connection, call get_tool_access with before",
+      "writes": false,
+      "schema_hash": "4091aa410b1a5faba14a520166e2710e4425e21c4e7f9ee00b1f544d64d0b36f",
+      "source": "examples/notion-mcp-live-manifest-2026-09-24.json",
+      "provenance": "dest Hermes OAuth tools/list 2026-09-24; writes true if a write verb is in the name or readOnlyHint is not true"
+    }
+  ]
+}

@@ -15,6 +15,7 @@ def main(argv=None):
         build.add_argument("--snapshot-id", required=True); build.add_argument("--snapshot-root", type=Path, required=True)
         build.add_argument("--revision", required=True); build.add_argument("--evidence", action="append", default=[])
         build.add_argument("--credential-file", type=Path)
+        build.add_argument("--capability-manifest", type=Path)
         builds[f"build-{activation}"] = activation
     activate = commands.add_parser("activate")
     activate.add_argument("release_id"); activate.add_argument("--expected-previous", default="")
@@ -30,7 +31,8 @@ def main(argv=None):
             evidence[name] = Path(value)
         release_id, manifest = build_release(root=args.root, snapshot_id=args.snapshot_id,
             snapshot_root=args.snapshot_root, evidence=evidence, revision=args.revision,
-            activation=builds[args.command], credential_file=args.credential_file)
+            activation=builds[args.command], credential_file=args.credential_file,
+            capability_manifest=args.capability_manifest)
         result = {"release_id": release_id, "manifest": manifest}
     elif args.command == "activate":
         store.activate(args.release_id, expected_previous=args.expected_previous or None)
