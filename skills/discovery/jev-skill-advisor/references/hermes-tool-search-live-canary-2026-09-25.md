@@ -1,0 +1,5 @@
+# Hermes native tool-search canary (2026-09-25)
+
+A fresh dest Hermes CLI session `20260925_113826_0a27e0` was asked to use `tool_search` to identify the native Notion search tool, not to invoke Notion or change data. It returned `mcp__notion__notion_search`. The redacted session export showed four messages (user, assistant tool call, tool result, assistant answer), **one** tool call named `tool_search`, and no Notion tool invocation. This proves the native capability can be found and named through Hermes's model-facing progressive-disclosure bridge in this session. It does not prove a Jev hint improved selection, answer quality on a real Notion task, or savings versus a no-Jev baseline.
+
+The Hermes `--usage-file` for that session reported model `gpt-6-sol`, two main API calls, 22,746 input tokens, 36 output tokens, and 29,056 cache-read tokens; `total_tokens` was 51,838 under Hermes's accounting. Do not sum the overlapping counters or treat this single run as an A/B result. The temporary redacted session export and usage file were parsed only for allowlisted metadata; neither prompt nor page content was copied into this repository.

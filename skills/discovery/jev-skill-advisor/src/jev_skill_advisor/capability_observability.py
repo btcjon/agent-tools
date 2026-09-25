@@ -8,6 +8,8 @@ arguments, schemas, page ids, OAuth material, and exception text have no field.
 ``failure_class``, when present, is one fixed token and never exception text.
 An invoke row may set ``route`` to ``native``; success then uses reason ``native``
 instead of ``bridge_read``.
+Hermes discovery and invoke rows may set ``route_mode`` to ``bridge`` or ``native``;
+this is the advisory arm, distinct from the actual invocation ``route``.
 
 ``summary`` adds ``invocation_routes``. A successful invoke is ``bridge`` when
 ``reason`` is ``bridge_read`` and ``route`` is absent, ``native`` when ``route``
@@ -55,6 +57,7 @@ SELECTION_REASONS = frozenset({
 })
 SELECTION_STATUSES = frozenset({"selected", "none", "fail_open"})
 INVOCATION_STATUSES = frozenset({"success", "denied"})
+ROUTE_MODES = frozenset({"bridge", "native"})
 # Invoke success is bridge_read unless route is native.
 INVOKE_SUCCESS_REASONS = frozenset({"bridge_read", "native"})
 _ROUTE_CLASSES = ("bridge", "native", "unknown")
@@ -115,7 +118,7 @@ _CODE_REASONS = {
 }
 _OPTIONAL = (
     "receipt_id", "session_id", "context_bytes", "schema_bytes", "fallback_reason",
-    "manifest_hash", "status", "reason", "failure_class", "route",
+    "manifest_hash", "status", "reason", "failure_class", "route", "route_mode",
 )
 _REQUIRED = ("host", "harness", "capability_ids", "stage", "outcome", "latency_ms")
 
@@ -140,7 +143,7 @@ def append_capability_event(path: Path | None, *, harness: str, stage: str, outc
                             schema_bytes: int | None = None, fallback_reason: str | None = None,
                             manifest_hash: str | None = None, status: str | None = None,
                             reason: str | None = None, failure_class: str | None = None,
-                            route: str | None = None) -> bool:
+                            route: str | None = None, route_mode: str | None = None) -> bool:
     """Append one allowlisted event. ``None`` path is the off switch."""
     if path is None:
         return False
@@ -150,7 +153,7 @@ def append_capability_event(path: Path | None, *, harness: str, stage: str, outc
                  capability_ids=capability_ids, host=host or _default_host(), receipt_id=receipt_id,
                  session_id=session_id, context_bytes=context_bytes, schema_bytes=schema_bytes,
                  fallback_reason=fallback_reason, manifest_hash=manifest_hash, status=status,
-                 reason=reason, failure_class=failure_class, route=route)
+                 reason=reason, failure_class=failure_class, route=route, route_mode=route_mode)
     event = {"event_schema": EVENT_SCHEMA, "event": EVENT_NAME, "timestamp": _now(), **body}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -259,7 +262,8 @@ def _body(*, harness: str, stage: str, outcome: str, latency_ms: int | float,
           session_id: str | None, context_bytes: int | None, schema_bytes: int | None,
           fallback_reason: str | None, manifest_hash: str | None = None,
           status: str | None = None, reason: str | None = None,
-          failure_class: str | None = None, route: str | None = None) -> dict:
+          failure_class: str | None = None, route: str | None = None,
+          route_mode: str | None = None) -> dict:
     if harness not in HARNESSES:
         raise ValueError("invalid_harness")
     if stage not in _OUTCOMES:
@@ -299,11 +303,15 @@ def _body(*, harness: str, stage: str, outcome: str, latency_ms: int | float,
         raise ValueError("invalid_reason")
     if route == "native" and status == "success" and reason != "native":
         raise ValueError("invalid_reason")
+    if route_mode is not None and (harness != "hermes" or stage not in {"discovery", "invoke"}
+                                   or route_mode not in ROUTE_MODES):
+        raise ValueError("invalid_route_mode")
     _put(body, "status", status)
     _put(body, "reason", reason)
     _put(body, "manifest_hash", manifest_hash)
     _put(body, "failure_class", failure_class)
     _put(body, "route", route)
+    _put(body, "route_mode", route_mode)
     return body
 
 
@@ -323,7 +331,7 @@ def _accepted(raw: dict) -> dict | None:
             session_id=raw.get("session_id"), context_bytes=raw.get("context_bytes"),
             schema_bytes=raw.get("schema_bytes"), fallback_reason=raw.get("fallback_reason"),
             manifest_hash=raw.get("manifest_hash"), status=raw.get("status"), reason=raw.get("reason"),
-            failure_class=raw.get("failure_class"), route=raw.get("route"),
+            failure_class=raw.get("failure_class"), route=raw.get("route"), route_mode=raw.get("route_mode"),
         )
     except ValueError:
         return None

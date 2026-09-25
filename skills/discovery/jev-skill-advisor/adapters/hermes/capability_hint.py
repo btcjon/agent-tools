@@ -16,6 +16,7 @@ result.
 from __future__ import annotations
 
 import json
+import os
 import re
 import socket
 import threading
@@ -82,6 +83,8 @@ _REGISTER_HOOKS = (
 )
 _NATIVE_TOOL = re.compile(r"^mcp__notion__notion_([A-Za-z0-9_]{1,80})$")
 _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,80}$")
+_NOTION_OPERATION = re.compile(r"^notion-[A-Za-z0-9_-]{1,44}$")
+_NATIVE_NAME = re.compile(r"^mcp__notion__notion_[A-Za-z0-9_]{1,44}$")
 _SECRET_MARKERS = ("bearer", "oauth", "sk-", "secret", "password", "authorization", "api_key", "apikey")
 _HINTS = {}
 _HINTS_LOCK = threading.Lock()
@@ -142,7 +145,7 @@ def _protected(task):
     return any(marker in lowered for marker in _PROTECTED)
 
 
-def format_hint(public, skill_id):
+def format_hint(public, skill_id, *, native_tools=None):
     """One advisory block. Empty when the object is not a verified five-card hint."""
     if not isinstance(public, dict) or not isinstance(skill_id, str):
         return ""
@@ -171,16 +174,28 @@ def format_hint(public, skill_id):
             return ""
         if any(token in description for token in ("inputSchema", "schema_hash", "\n", "<", ">", "{")):
             return ""
-        lines.append(f"{identifier}: {description}")
+        if native_tools is not None:
+            native_name = native_tools.get(identifier) if isinstance(native_tools, dict) else None
+            if native_name is not None:
+                if not isinstance(native_name, str) or not _NATIVE_NAME.fullmatch(native_name):
+                    return ""
+                lines.append(f"{identifier}: {description} [tool: {native_name}]")
+        else:
+            lines.append(f"{identifier}: {description}")
         ids.append(identifier)
     expected = capability_correlation(manifest_hash, skill_id, ids, "selected")
     if public.get("correlation") != expected:
         return ""
+    if not lines:
+        return ""
     body = "\n".join(lines)
-    return (
+    if native_tools is not None:
+        body += "\nFor a selected read, load its native schema with tool_describe, then use tool_call. This hint grants no write permission."
+    rendered = (
         f'\n\n<capability-hint advisory="true" authorizes-calls="false" manifest-hash="{manifest_hash}">\n'
         f"{body}\n</capability-hint>"
     )
+    return rendered if len(rendered.encode("utf-8")) <= 2048 else ""
 
 
 def _receipt_block(session_id, receipt_id):
@@ -195,6 +210,25 @@ def _receipt_block(session_id, receipt_id):
         "The advisory correlation is not authorization."
         "</capability-receipt>"
     )
+
+
+def _native_tools(manifest, cards):
+    """Map selected pinned operations to Hermes's exact MCP registry names."""
+    mapped = {}
+    for card in cards:
+        identifier = card.get("id") if isinstance(card, dict) else None
+        entry = manifest.entries.get(identifier) if isinstance(identifier, str) else None
+        if entry is None or entry.server != "notion":
+            return None
+        if entry.writes:
+            continue
+        if not _NOTION_OPERATION.fullmatch(entry.operation):
+            return None
+        name = "mcp__notion__" + re.sub(r"[^A-Za-z0-9_]", "_", entry.operation)
+        if len(name) > 64 or not _NATIVE_NAME.fullmatch(name) or name in mapped.values():
+            return None
+        mapped[identifier] = name
+    return mapped
 
 
 def bind_service_receipt(service, *, session_id, task, skill_id, capability_ids, manifest_hash, reason):
@@ -271,13 +305,13 @@ def _base(context, calls=0):
     }
 
 
-def pre_model_context(payload, task, *, manifest_path=None, evaluator=None, session_id=None, service=None, deadline_s=2.0):
+def pre_model_context(payload, task, *, manifest_path=None, evaluator=None, session_id=None, service=None, deadline_s=2.0, route_mode="bridge"):
     """Return plugin context. The skill body stays. A hint is added only for Notion."""
     selected = _selected(payload)
     context = skill_context(selected)
     path = _manifest_path(manifest_path)
     cards = _cards(selected) if isinstance(selected, dict) else []
-    if context == MISS or path is None or not cards or not notion_skill_selected(cards):
+    if context == MISS or path is None or not cards or not notion_skill_selected(cards) or route_mode not in {"bridge", "native"}:
         return _base(context)
     skill_id = cards[0]["id"]
     if not isinstance(task, str) or _protected(task):
@@ -309,7 +343,16 @@ def pre_model_context(payload, task, *, manifest_path=None, evaluator=None, sess
         public = public_capabilities(decision, skill_id)
     except Exception:
         return _base(context, calls["n"])
-    hint = format_hint(public, skill_id)
+    if route_mode == "native":
+        native_tools = _native_tools(manifest, public.get("cards") or []) if isinstance(public, dict) else None
+        hint = format_hint(public, skill_id, native_tools=native_tools) if native_tools else ""
+    else:
+        hint = format_hint(public, skill_id)
+    if route_mode == "native" and isinstance(public, dict) and public.get("status") == "selected" and not hint:
+        return _base(context, calls["n"])
+    visible_ids = list(native_tools) if route_mode == "native" and hint else (
+        [card["id"] for card in public["cards"]] if hint else []
+    )
     receipt_id = None
     if hint:
         receipt_id = bind_service_receipt(
@@ -317,20 +360,21 @@ def pre_model_context(payload, task, *, manifest_path=None, evaluator=None, sess
             session_id=session_id,
             task=task,
             skill_id=skill_id,
-            capability_ids=[card["id"] for card in public["cards"]],
+            capability_ids=visible_ids,
             manifest_hash=public["manifest_hash"],
             reason=public.get("reason") if isinstance(public.get("reason"), str) else "capability_choice_selected",
         )
     rendered = context + hint
-    if receipt_id:
+    if receipt_id and route_mode == "bridge":
         rendered += _receipt_block(session_id, receipt_id)
     event_fields = None
     if isinstance(public, dict) and public.get("status") in {"selected", "none", "fail_open"}:
         event_fields = {
-            "capability_ids": [card["id"] for card in public["cards"]] if hint else [],
+            "capability_ids": visible_ids,
             "capability_manifest_hash": public.get("manifest_hash") if isinstance(public.get("manifest_hash"), str) else "",
             "capability_status": public.get("status"),
             "capability_surface": "service" if receipt_id else "advisory",
+            "route_mode": route_mode,
         }
     return {
         "context": rendered,
@@ -367,6 +411,7 @@ def live_pre_model_context(
     store=None,
     service_factory=None,
     events_path=None,
+    route_mode=None,
 ):
     """Return today's skill context unless the Notion release path is enabled.
 
@@ -380,6 +425,10 @@ def live_pre_model_context(
     selected = _selected(payload)
     base = _base(skill_context(selected))
     if enabled is not True:
+        return base
+    if route_mode is None:
+        route_mode = os.environ.get("JEV_HERMES_CAPABILITY_MODE", "bridge")
+    if route_mode == "off" or route_mode not in {"bridge", "native"}:
         return base
     cards = _cards(selected) if isinstance(selected, dict) else []
     if base["context"] == MISS or not cards or not notion_skill_selected(cards):
@@ -398,6 +447,7 @@ def live_pre_model_context(
             store=store,
             service_factory=service_factory,
             base=base,
+            route_mode=route_mode,
         )
     except Exception:
         return base
@@ -415,6 +465,7 @@ def live_pre_model_context(
                 context_bytes=len(augmented["context"].encode("utf-8")),
                 manifest_hash=public.get("manifest_hash"),
                 status=status, reason=public.get("reason"),
+                route_mode=route_mode,
             )
         except (OSError, TypeError, ValueError):
             return base
@@ -425,6 +476,8 @@ def live_pre_model_context(
             session_id,
             receipt_id=augmented.get("receipt_id") if isinstance(augmented, dict) else None,
             manifest_hash=public.get("manifest_hash") if isinstance(public, dict) else None,
+            capability_ids=augmented.get("event_fields", {}).get("capability_ids") if isinstance(augmented, dict) and isinstance(augmented.get("event_fields"), dict) else None,
+            route_mode=route_mode,
         )
     except Exception:
         pass
@@ -442,6 +495,7 @@ def _notion_release_context(
     store,
     service_factory,
     base,
+    route_mode,
 ):
     host = _session_host(host)
     if host is None:
@@ -474,6 +528,7 @@ def _notion_release_context(
         evaluator=evaluator,
         session_id=session_id,
         service=service,
+        route_mode=route_mode,
     )
 
 
@@ -485,7 +540,7 @@ def _safe_token(value):
     return value
 
 
-def remember_verified_hint(session_id, *, receipt_id, manifest_hash):
+def remember_verified_hint(session_id, *, receipt_id, manifest_hash, capability_ids=None, route_mode="bridge"):
     """Keep one same-process hint. Invalid tokens are ignored."""
     session_id = _safe_token(session_id)
     receipt_id = _safe_token(receipt_id)
@@ -493,12 +548,17 @@ def remember_verified_hint(session_id, *, receipt_id, manifest_hash):
         return False
     if not isinstance(manifest_hash, str) or not _HASH.fullmatch(manifest_hash):
         return False
+    if (not isinstance(capability_ids, list) or not capability_ids or len(capability_ids) > MAX_CARDS
+            or any(not isinstance(item, str) or not _CAPABILITY_ID.fullmatch(item) for item in capability_ids)
+            or len(set(capability_ids)) != len(capability_ids) or route_mode not in {"bridge", "native"}):
+        return False
     with _HINTS_LOCK:
         now = time.monotonic()
         for key, item in list(_HINTS.items()):
             if now - item["seen_at"] > _HINT_TTL_S:
                 _HINTS.pop(key, None)
-        _HINTS[session_id] = {"receipt_id": receipt_id, "manifest_hash": manifest_hash, "seen_at": now}
+        _HINTS[session_id] = {"receipt_id": receipt_id, "manifest_hash": manifest_hash,
+                              "capability_ids": frozenset(capability_ids), "route_mode": route_mode, "seen_at": now}
         while len(_HINTS) > _HINT_LIMIT:
             oldest = next(iter(_HINTS))
             _HINTS.pop(oldest, None)
@@ -549,6 +609,9 @@ def observe_post_tool_call(payload, *, events_path=None, enabled=False):
                 return False
             receipt_id = stored["receipt_id"]
             manifest_hash = stored["manifest_hash"]
+            if tool_id not in stored["capability_ids"]:
+                return False
+            route_mode = stored["route_mode"]
         status = payload.get("status")
         if status in (None, "", "ok", "success"):
             outcome, event_status, reason = "success", "success", "native"
@@ -579,6 +642,7 @@ def observe_post_tool_call(payload, *, events_path=None, enabled=False):
             status=event_status,
             reason=reason,
             route="native",
+            route_mode=route_mode,
         ))
     except Exception:
         return False

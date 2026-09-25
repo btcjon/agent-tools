@@ -98,15 +98,17 @@ def test_native_route_is_allowlisted_and_never_logs_tool_payload(tmp_path):
         harness="hermes", stage="invoke", outcome="success", latency_ms=4,
         host="dest-host", capability_ids=["notion.mcp.fetch"],
         receipt_id="receipt-1", session_id="session-1",
-        manifest_hash="a" * 64, status="success", reason="native", route="native",
+        manifest_hash="a" * 64, status="success", reason="native", route="native", route_mode="native",
     )
     assert append_capability_event(path, **base)
     row = json.loads(path.read_text().splitlines()[0])
-    assert row["route"] == "native" and row["reason"] == "native"
+    assert row["route"] == "native" and row["reason"] == "native" and row["route_mode"] == "native"
     rejected = [
         {**base, "route": SECRET_PROMPT},
         {**base, "route": "bridge"},
         {**base, "route": None},
+        {**base, "route_mode": SECRET_PROMPT},
+        {**base, "harness": "codex"},
         {**base, "stage": "discovery", "outcome": "selected", "context_bytes": 0},
     ]
     for item in rejected:

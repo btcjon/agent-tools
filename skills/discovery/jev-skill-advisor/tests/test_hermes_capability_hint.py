@@ -35,6 +35,7 @@ def _clear_verified_hints():
 
 @pytest.fixture(autouse=True)
 def _no_full_selector(monkeypatch):
+    monkeypatch.delenv("JEV_HERMES_CAPABILITY_MODE", raising=False)
     def boom(*_args, **_kwargs):
         raise AssertionError("full selector ran")
 
@@ -182,6 +183,109 @@ def test_notion_hint_and_service_receipt_skip_the_catalog(tmp_path):
     assert "inputSchema" not in context
     assert result["event_fields"]["capability_surface"] == "service"
     assert result["event_fields"]["capability_ids"] == ["notion.mcp.fetch"]
+
+
+def test_native_route_names_only_selected_manifest_tools_and_keeps_receipt_internal(tmp_path):
+    path = _manifest(tmp_path, [
+        _entry("notion.mcp.search", "notion-search", "Search Notion by keyword."),
+        _entry("notion.mcp.fetch", "notion-fetch", "Read one Notion page by id."),
+    ])
+    service = _Service()
+    result = hint.pre_model_context(
+        _notion(), "find and read a Notion page", manifest_path=path,
+        evaluator=_evaluator(("notion.mcp.search", "notion.mcp.fetch")),
+        session_id="session-1", service=service, route_mode="native",
+    )
+    context = result["context"]
+    assert "notion.mcp.search: Search Notion by keyword. [tool: mcp__notion__notion_search]" in context
+    assert "notion.mcp.fetch: Read one Notion page by id. [tool: mcp__notion__notion_fetch]" in context
+    assert "tool_describe, then use tool_call" in context
+    assert 'authorizes-calls="false"' in context
+    assert "mcp__jev_skill_advisor__notion_fetch" not in context
+    assert "capability-receipt" not in context
+    assert "receipt123" not in context
+    assert result["receipt_id"] == "receipt123"
+    assert service.receipts[0]["capability_ids"] == ["notion.mcp.fetch", "notion.mcp.search"]
+    advisory = "\n\n<capability-hint" + context.split("\n\n<capability-hint", 1)[1]
+    assert len(advisory.encode("utf-8")) <= 2048
+    assert "inputSchema" not in context
+
+
+def test_native_route_omits_unselected_and_write_tools(tmp_path):
+    write = _entry("notion.mcp.create-pages", "notion-create-pages", "Create Notion pages.")
+    write["writes"] = True
+    path = _manifest(tmp_path, [
+        _entry("notion.mcp.search", "notion-search", "Search Notion by keyword."),
+        _entry("notion.mcp.fetch", "notion-fetch", "Read one Notion page."),
+        write,
+    ])
+
+    def evaluator(payload, _timeout):
+        answers = {}
+        for index, card in enumerate(payload["state"]["candidates"]):
+            answers[f"fit_{index}"] = {"type": "noul", "noul": 0.9 if card["id"] != "notion.mcp.fetch" else 0.1}
+        answers["write_intent"] = {"type": "noul", "noul": 0.9}
+        return {"model": MODEL, "usage": {"input_tokens": 4}, "answers": answers}
+
+    service = _Service()
+    result = hint.pre_model_context(
+        _notion(), "search and create a Notion page", manifest_path=path,
+        evaluator=evaluator, session_id="session-1", service=service, route_mode="native",
+    )
+    context = result["context"]
+    assert "mcp__notion__notion_search" in context
+    assert "mcp__notion__notion_fetch" not in context
+    assert "mcp__notion__notion_create_pages" not in context
+    assert service.receipts[0]["capability_ids"] == ["notion.mcp.search"]
+    assert result["event_fields"]["capability_ids"] == ["notion.mcp.search"]
+    assert result["event_fields"]["route_mode"] == "native"
+
+
+def test_native_route_fails_closed_on_bad_or_colliding_manifest_names(tmp_path):
+    invalid = _manifest(tmp_path, [_entry("notion.mcp.bad", "bad-operation", "Read bad data.")])
+    result = hint.pre_model_context(
+        _notion(), "read bad data", manifest_path=invalid,
+        evaluator=_evaluator(("notion.mcp.bad",)), route_mode="native",
+    )
+    assert "capability-hint" not in result["context"]
+
+    long_name = _manifest(tmp_path, [_entry("notion.mcp.long", "notion-" + "x" * 45, "Read long data.")])
+    result = hint.pre_model_context(
+        _notion(), "read long data", manifest_path=long_name,
+        evaluator=_evaluator(("notion.mcp.long",)), route_mode="native",
+    )
+    assert "capability-hint" not in result["context"]
+    assert "mcp__" not in result["context"]
+
+    collision = _manifest(tmp_path, [
+        _entry("notion.mcp.first", "notion-read-data", "Read data."),
+        _entry("notion.mcp.second", "notion-read_data", "Read data again."),
+    ])
+    result = hint.pre_model_context(
+        _notion(), "read data", manifest_path=collision,
+        evaluator=_evaluator(("notion.mcp.first", "notion.mcp.second")), route_mode="native",
+    )
+    assert "capability-hint" not in result["context"]
+
+
+def test_native_route_write_hint_never_authorizes_or_invokes(tmp_path):
+    entry = _entry("notion.mcp.create-pages", "notion-create-pages", "Create Notion pages.")
+    entry["writes"] = True
+    path = _manifest(tmp_path, [entry])
+
+    def evaluator(payload, _timeout):
+        return {"model": MODEL, "usage": {"input_tokens": 4}, "answers": {
+            "fit_0": {"type": "noul", "noul": 0.9},
+            "write_intent": {"type": "noul", "noul": 0.9},
+        }}
+
+    result = hint.pre_model_context(
+        _notion(), "create a Notion page", manifest_path=path,
+        evaluator=evaluator, route_mode="native",
+    )
+    assert "mcp__notion__notion_create_pages" not in result["context"]
+    assert "capability-hint" not in result["context"]
+    assert "capability-receipt" not in result["context"]
 
 
 def test_hint_caps_at_five_cards(tmp_path):
@@ -399,6 +503,33 @@ def test_live_notion_uses_bound_manifest_once(tmp_path, monkeypatch):
     assert "NOTION_BODY_SENTINEL" not in events.read_text(encoding="utf-8")
 
 
+def test_live_route_mode_env_switches_only_the_advisory_hint(tmp_path, monkeypatch):
+    path = _manifest(tmp_path, [_entry("notion.mcp.fetch", "notion-fetch", "Read one Notion page by id.")])
+    evaluator = _evaluator(("notion.mcp.fetch",))
+    service = _live_service(evaluator)
+    kwargs = {
+        "session_id": "session-1", "enabled": True, "host": "dest-host",
+        "store": _ReleaseStore(path=path), "service_factory": lambda _profile: service,
+    }
+    monkeypatch.setenv("JEV_HERMES_CAPABILITY_MODE", "off")
+    off = hint.live_pre_model_context(_notion_live(), "read a Notion page", **kwargs)
+    assert "capability-hint" not in off["context"]
+    assert evaluator.calls == []
+
+    monkeypatch.setenv("JEV_HERMES_CAPABILITY_MODE", "native")
+    native = hint.live_pre_model_context(_notion_live(), "read a Notion page", **kwargs)
+    assert "mcp__notion__notion_fetch" in native["context"]
+    assert "mcp__jev_skill_advisor__notion_fetch" not in native["context"]
+    assert "capability-receipt" not in native["context"]
+    assert native["receipt_id"] == "receipt123"
+    assert len(evaluator.calls) == 1
+
+    monkeypatch.setenv("JEV_HERMES_CAPABILITY_MODE", "unrecognized")
+    invalid = hint.live_pre_model_context(_notion_live(), "read a Notion page", **kwargs)
+    assert "capability-hint" not in invalid["context"]
+    assert len(evaluator.calls) == 1
+
+
 def test_live_event_failure_keeps_skill_body_without_hint(tmp_path):
     path = _manifest(tmp_path, [_entry("notion.mcp.fetch", "notion-fetch", "Read one Notion page by id.")])
     service = _live_service(_evaluator(("notion.mcp.fetch",)))
@@ -512,13 +643,15 @@ def test_live_mismatch_and_failures_do_not_call_jev(tmp_path, monkeypatch):
 def test_native_observer_records_only_allowlisted_identity(tmp_path):
     path = tmp_path / "events.jsonl"
     secret = "Bearer private-page-argument"
-    assert hint.remember_verified_hint("session-1", receipt_id="receipt123", manifest_hash=HASH)
+    assert hint.remember_verified_hint("session-1", receipt_id="receipt123", manifest_hash=HASH,
+                                       capability_ids=["notion.mcp.fetch"], route_mode="native")
     assert hint.observe_post_tool_call({
         "tool_name": "mcp__notion__notion_fetch", "session_id": "session-1", "status": "success",
         "duration_ms": 17.4, "args": {"id": secret}, "result": secret, "error_message": secret,
     }, events_path=path, enabled=True)
     row = json.loads(path.read_text().splitlines()[0])
     assert row["route"] == "native"
+    assert row["route_mode"] == "native"
     assert row["capability_ids"] == ["notion.mcp.fetch"]
     assert row["receipt_id"] == "receipt123"
     assert row["session_id"] == "session-1"
@@ -533,21 +666,19 @@ def test_native_observer_write_failure_and_missing_hint(tmp_path):
     assert not hint.observe_post_tool_call({
         "tool_name": "mcp__notion__notion_fetch", "session_id": "session-1",
     }, events_path=path, enabled=True)
-    assert hint.remember_verified_hint("session-1", receipt_id="receipt123", manifest_hash=HASH)
+    assert hint.remember_verified_hint("session-1", receipt_id="receipt123", manifest_hash=HASH,
+                                       capability_ids=["notion.mcp.fetch"], route_mode="native")
     assert not hint.observe_post_tool_call({
         "tool_name": "mcp__jev_skill_advisor__notion_fetch", "session_id": "session-1",
     }, events_path=path, enabled=True)
     assert not hint.observe_post_tool_call({
         "tool_name": "mcp__notion__notion_fetch", "session_id": "session-2",
     }, events_path=path, enabled=True)
-    assert hint.observe_post_tool_call({
+    assert not hint.observe_post_tool_call({
         "tool_name": "mcp__notion__notion_create_pages", "session_id": "session-1",
         "status": "error", "error_message": "sk-secret", "duration_ms": 8,
     }, events_path=path, enabled=True)
-    row = json.loads(path.read_text().splitlines()[0])
-    assert row["capability_ids"] == ["notion.mcp.create-pages"]
-    assert row["outcome"] == "failed" and row["reason"] == "other"
-    assert "sk-secret" not in path.read_text()
+    assert not path.exists()
     hint.forget_verified_hint("session-1")
     assert not hint.observe_post_tool_call({
         "tool_name": "mcp__notion__notion_fetch", "session_id": "session-1",
@@ -557,7 +688,8 @@ def test_native_observer_write_failure_and_missing_hint(tmp_path):
 def test_native_observer_is_fail_open_and_hints_are_bounded(tmp_path, monkeypatch):
     clock = {"now": 10.0}
     monkeypatch.setattr(hint.time, "monotonic", lambda: clock["now"])
-    assert hint.remember_verified_hint("session-1", receipt_id="receipt123", manifest_hash=HASH)
+    assert hint.remember_verified_hint("session-1", receipt_id="receipt123", manifest_hash=HASH,
+                                       capability_ids=["notion.mcp.fetch"], route_mode="native")
     assert not hint.observe_post_tool_call({
         "tool_name": "mcp__notion__notion_fetch", "session_id": "session-1",
     }, events_path=tmp_path / "missing" / "events.jsonl", enabled=False)
@@ -567,7 +699,8 @@ def test_native_observer_is_fail_open_and_hints_are_bounded(tmp_path, monkeypatc
     }, events_path=tmp_path / "events.jsonl", enabled=True)
     assert not (tmp_path / "events.jsonl").exists()
     for index in range(hint._HINT_LIMIT + 2):
-        assert hint.remember_verified_hint(f"session-{index}", receipt_id="receipt123", manifest_hash=HASH)
+        assert hint.remember_verified_hint(f"session-{index}", receipt_id="receipt123", manifest_hash=HASH,
+                                           capability_ids=["notion.mcp.fetch"], route_mode="native")
     assert len(hint._HINTS) <= hint._HINT_LIMIT
     assert "session-0" not in hint._HINTS
 
