@@ -214,6 +214,14 @@ class CapabilityEvalTests(unittest.TestCase):
             saved = json.loads(report_path.read_text(encoding="utf-8"))
             self.assertEqual(seen["profile"], profile_path)
         self.assertIs(seen["runtime_profile"], sentinel)
+        first_operation_id = seen["operation_id"]
+        self.assertRegex(first_operation_id, r"^capability-eval-[0-9a-f]{32}$")
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("jev_skill_advisor.capability_eval.resolve_profile", resolve_profile), \
+                 patch("jev_skill_advisor.capability_eval.ServiceRuntime", Runtime), \
+                 patch("jev_skill_advisor.client.evaluate", side_effect=AssertionError("network")):
+                self.assertEqual(main(["--live", "--report", str(Path(tmp) / "repeat.json")]), 0)
+        self.assertNotEqual(seen["operation_id"], first_operation_id)
         self.assertTrue(saved["live"])
         self.assertEqual(saved["metrics"]["top1_precision"], 1.0)
         blob = json.dumps(saved)

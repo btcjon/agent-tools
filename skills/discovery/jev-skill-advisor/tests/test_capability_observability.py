@@ -1,13 +1,24 @@
 import json
+import os
+import subprocess
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
 from jev_skill_advisor.capability_observability import (
+    ROUTE_CORRELATION_NOTE,
+    ROUTE_DEDUPE_RULE,
+    ROUTE_EXCLUSION_NOTE,
+    ROUTE_INFERENCE,
     append_capability_event,
     fallback_reason_for_code,
     summary,
 )
+
+HASH = "a" * 64
+PAGE_ID = "0123456789abcdef0123456789abcdef"
 
 SECRET_PROMPT = "SECRET PROMPT alpha-phrase"
 SECRET_BODY = "SECRET SKILL BODY beta-phrase"
@@ -198,3 +209,218 @@ def test_summary_separates_selection_from_invocation(tmp_path):
     assert report["coverage"]["describe_with_schema_bytes"] == 1
     assert report["coverage"]["absent_sources"] == 2
     assert report["rejected_rows"] == 0
+    routes = report["invocation_routes"]
+    assert routes["successful_invokes"]["raw"]["unknown"] == 1
+    assert routes["successful_invokes"]["raw"]["bridge"] == 0
+    assert routes["successful_invokes"]["raw"]["native"] == 0
+    assert routes["inference"] == ROUTE_INFERENCE
+
+
+def _walk_strings(value):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            assert isinstance(key, str)
+            yield key
+            yield from _walk_strings(item)
+    elif isinstance(value, str):
+        yield value
+    elif isinstance(value, int) and not isinstance(value, bool):
+        return
+    else:
+        raise AssertionError(type(value))
+
+
+def _append(path, **kwargs):
+    assert append_capability_event(path, host="mac", latency_ms=1, **kwargs)
+
+
+def test_invocation_routes_report_both_routes_duplicates_and_exclusions(tmp_path):
+    path = tmp_path / "events.jsonl"
+    fetch = ["notion.mcp.fetch"]
+    bridge = dict(status="success", reason="bridge_read", manifest_hash=HASH)
+    native = dict(status="success", reason="native", route="native", manifest_hash=HASH)
+    _append(path, harness="hermes", stage="discovery", outcome="selected", context_bytes=0,
+            capability_ids=fetch, session_id="b1-session", receipt_id="b1-receipt")
+    _append(path, harness="hermes", stage="discovery", outcome="selected", context_bytes=0,
+            capability_ids=fetch, session_id="b1-session", receipt_id="b1-receipt")
+    for receipt in ("b1-receipt", "b1-receipt", "b1-r2"):
+        _append(path, harness="hermes", stage="invoke", outcome="success", capability_ids=fetch,
+                session_id="b1-session", receipt_id=receipt, **bridge)
+    _append(path, harness="hermes", stage="invoke", outcome="success", capability_ids=["notion.mcp.search"],
+            session_id="b1-session", receipt_id="b1-search", **bridge)
+    _append(path, harness="hermes", stage="discovery", outcome="selected", context_bytes=0,
+            capability_ids=["notion.mcp.fetch", "notion.mcp.search"], session_id="n1-session",
+            receipt_id="n1-receipt")
+    _append(path, harness="hermes", stage="invoke", outcome="success", capability_ids=fetch,
+            session_id="n1-session", receipt_id="n1-receipt", **native)
+    _append(path, harness="hermes", stage="discovery", outcome="selected", context_bytes=0,
+            capability_ids=fetch, session_id="idle-session", receipt_id="idle-receipt")
+    _append(path, harness="hermes", stage="invoke", outcome="failed", capability_ids=fetch,
+            session_id="idle-session", receipt_id="idle-receipt", manifest_hash=HASH,
+            status="denied", reason="other", route="native")
+    _append(path, harness="hermes", stage="discovery", outcome="selected", context_bytes=0,
+            capability_ids=fetch, session_id="both-session", receipt_id="both-receipt")
+    _append(path, harness="hermes", stage="invoke", outcome="success", capability_ids=fetch,
+            session_id="both-session", receipt_id="both-receipt", **bridge)
+    _append(path, harness="hermes", stage="invoke", outcome="success", capability_ids=fetch,
+            session_id="both-session", receipt_id="both-receipt", **native)
+    _append(path, harness="hermes", stage="discovery", outcome="selected", context_bytes=0,
+            capability_ids=fetch, session_id="unk-session", receipt_id="unk-receipt")
+    _append(path, harness="hermes", stage="invoke", outcome="success", capability_ids=fetch,
+            session_id="unk-session", receipt_id="unk-receipt")
+    _append(path, harness="hermes", stage="invoke", outcome="success", capability_ids=fetch,
+            session_id="unk-session")
+    _append(path, harness="hermes", stage="discovery", outcome="selected", context_bytes=0,
+            capability_ids=fetch)
+    _append(path, harness="hermes", stage="discovery", outcome="selected", context_bytes=4,
+            capability_ids=fetch, session_id="x1-session", receipt_id="x1-receipt")
+    _append(path, harness="hermes", stage="invoke", outcome="success", capability_ids=fetch,
+            session_id="x1-session", receipt_id="x1-receipt", **native)
+    stored = path.read_text(encoding="utf-8")
+    path.write_text(stored + "\n".join([
+        json.dumps({
+            "event_schema": 1, "event": "capability_path", "timestamp": "2020-01-01T00:00:00Z",
+            "host": "mac", "harness": "hermes", "capability_ids": ["notion.mcp.get-comments"],
+            "stage": "invoke", "outcome": "success", "latency_ms": 1,
+            "receipt_id": "old-receipt", "session_id": "old-session", "manifest_hash": HASH,
+            "status": "success", "reason": "native", "route": "native",
+        }),
+        json.dumps({
+            "event": "capability_path", "event_schema": 1, "stage": "invoke", "outcome": "success",
+            "harness": "hermes", "host": "mac", "capability_ids": fetch, "latency_ms": 1,
+            "timestamp": "2026-09-25T00:00:00Z", "status": "success", "reason": "bridge_read",
+            "route": "native", "manifest_hash": HASH, "page_id": PAGE_ID,
+            "arguments": {"q": SECRET_ARGS}, "error": SECRET_EXC, "task": SECRET_PROMPT,
+        }),
+        "not-json " + SECRET_BODY,
+        json.dumps({"event": "selection_attempt", "task": SECRET_PROMPT, "page_id": PAGE_ID}),
+        "",
+    ]) + "\n", encoding="utf-8")
+    now = datetime.now(timezone.utc)
+    excluded = ["x1-session", "x1-session", "n1"]
+    report = summary([path, tmp_path / "missing.jsonl"], now=now, exclude_session_ids=excluded)
+    again = summary([tmp_path / "missing.jsonl", path], now=now, exclude_session_ids=["n1", "x1-session"])
+    assert report == again
+    assert report["counts"]["events"] == 19
+    assert report["counts"]["invoke_success"] == 10
+    assert report["rejected_rows"] == 2
+    assert report["selection"]["invoked_ids"] == ["notion.mcp.fetch", "notion.mcp.search"]
+    assert "notion.mcp.get-comments" not in report["selection"]["invoked_ids"]
+    untouched = summary([path], now=now)
+    assert untouched["counts"] == report["counts"]
+    assert untouched["selection"] == report["selection"]
+    routes = report["invocation_routes"]
+    assert routes["excluded_session_id_count"] == 2
+    assert routes["excluded_events"] == 2
+    assert routes["denominator"] == {
+        "rows_after_exclusion": 17,
+        "successful_invokes_raw": 9,
+        "successful_invokes_deduped": 8,
+        "selected_sessions": 5,
+        "selected_session_capabilities": 6,
+        "selected_discovery_events_without_session_id": 1,
+        "selected_discovery_events_without_receipt_id": 0,
+    }
+    assert routes["successful_invokes"] == {
+        "raw": {"bridge": 5, "native": 2, "unknown": 2, "total": 9},
+        "deduped": {"bridge": 4, "native": 2, "unknown": 2, "total": 8},
+    }
+    assert routes["selected_sessions"]["denominator"] == 5
+    assert routes["selected_sessions"]["with_bridge_success"] == 2
+    assert routes["selected_sessions"]["with_native_success"] == 2
+    assert routes["selected_sessions"]["with_unknown_success"] == 1
+    assert routes["selected_sessions"]["with_any_success"] == 4
+    assert routes["selected_sessions"]["without_invocation"] == 1
+    assert sum(routes["selected_sessions"]["partition"].values()) == 5
+    assert routes["selected_sessions"]["partition"]["bridge"] == 1
+    assert routes["selected_sessions"]["partition"]["native"] == 1
+    assert routes["selected_sessions"]["partition"]["unknown"] == 1
+    assert routes["selected_sessions"]["partition"]["bridge+native"] == 1
+    assert routes["selected_sessions"]["partition"]["without_invocation"] == 1
+    assert routes["selected_session_capabilities"]["denominator"] == 6
+    assert routes["selected_session_capabilities"]["without_invocation"] == 2
+    assert routes["selected_session_capabilities"]["partition"]["bridge+native"] == 1
+    assert sum(routes["selected_session_capabilities"]["partition"].values()) == 6
+    assert routes["uncorrelated_successful_invokes_raw"] == 3
+    assert untouched["invocation_routes"]["successful_invokes"]["raw"]["native"] == 3
+    rendered = json.dumps(routes)
+    for secret in (*SECRETS, PAGE_ID, "b1-session", "x1-session", "old-session", "b1-r1", "old-receipt", HASH):
+        assert secret not in rendered
+    assert set(item for item in _walk_strings(routes) if item in {
+        ROUTE_DEDUPE_RULE, ROUTE_EXCLUSION_NOTE, ROUTE_CORRELATION_NOTE, ROUTE_INFERENCE,
+    }) == {ROUTE_DEDUPE_RULE, ROUTE_EXCLUSION_NOTE, ROUTE_CORRELATION_NOTE, ROUTE_INFERENCE}
+    for item in _walk_strings(routes):
+        if item in {ROUTE_DEDUPE_RULE, ROUTE_EXCLUSION_NOTE, ROUTE_CORRELATION_NOTE, ROUTE_INFERENCE}:
+            continue
+        assert item.replace("_", "").replace("+", "").isalnum()
+    hidden = summary([path], now=now, exclude_session_ids=[SECRET_PROMPT])
+    _assert_hidden(json.dumps(hidden["invocation_routes"]))
+    with pytest.raises(ValueError) as caught:
+        summary([path], exclude_session_ids=["ok", 3])
+    _assert_hidden(str(caught.value))
+    with pytest.raises(ValueError) as bad_shape:
+        summary([path], exclude_session_ids=SECRET_OAUTH)
+    _assert_hidden(str(bad_shape.value))
+
+
+def test_route_report_cli_is_read_only(tmp_path):
+    path = tmp_path / "events.jsonl"
+    _append(path, harness="hermes", stage="discovery", outcome="selected", context_bytes=0,
+            capability_ids=["notion.mcp.fetch"], session_id="live-session", receipt_id="live-receipt")
+    _append(path, harness="hermes", stage="invoke", outcome="success", capability_ids=["notion.mcp.fetch"],
+            session_id="live-session", receipt_id="live-receipt", manifest_hash=HASH,
+            status="success", reason="native", route="native")
+    _append(path, harness="hermes", stage="discovery", outcome="selected", context_bytes=0,
+            capability_ids=["notion.mcp.fetch"], session_id="test-session", receipt_id="test-receipt")
+    _append(path, harness="hermes", stage="invoke", outcome="success", capability_ids=["notion.mcp.fetch"],
+            session_id="test-session", receipt_id="test-receipt", manifest_hash=HASH,
+            status="success", reason="bridge_read")
+    path.write_text(path.read_text(encoding="utf-8") + json.dumps({
+        "event": "capability_path", "page_id": PAGE_ID, "error": SECRET_EXC, "task": SECRET_PROMPT,
+    }) + "\n", encoding="utf-8")
+    before = path.read_bytes()
+    script = Path(__file__).resolve().parents[1] / "scripts" / "capability_route_report.py"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(script.parents[1] / "src") + os.pathsep + env.get("PYTHONPATH", "")
+    proc = subprocess.run(
+        [sys.executable, str(script), str(path), "--exclude-session-id", "test-session", "--since-hours", "24"],
+        check=False, capture_output=True, text=True, env=env,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert path.read_bytes() == before
+    payload = json.loads(proc.stdout)
+    assert set(payload) == {"window_start", "window_end", "invocation_routes"}
+    assert payload["invocation_routes"]["successful_invokes"]["raw"] == {
+        "bridge": 0, "native": 1, "unknown": 0, "total": 1,
+    }
+    assert payload["invocation_routes"]["selected_sessions"]["partition"]["native"] == 1
+    assert payload["invocation_routes"]["excluded_events"] == 2
+    assert payload["invocation_routes"]["inference"] == ROUTE_INFERENCE
+    rendered = proc.stdout
+    for secret in (*SECRETS, PAGE_ID, "live-session", "test-session", "live-receipt", HASH):
+        assert secret not in rendered
+    refused = subprocess.run(
+        [sys.executable, str(script), str(path), "--since-hours", "-1"],
+        check=False, capture_output=True, text=True, env=env,
+    )
+    assert refused.returncode == 2
+    assert refused.stderr.strip() == "invalid_window"
+    assert path.read_bytes() == before
+
+
+def test_route_correlation_requires_matching_receipt(tmp_path):
+    path = tmp_path / "events.jsonl"
+    fetch = ["notion.mcp.fetch"]
+    _append(path, harness="hermes", stage="discovery", outcome="selected", context_bytes=0,
+            capability_ids=fetch, session_id="same-session", receipt_id="first-receipt")
+    _append(path, harness="hermes", stage="invoke", outcome="success", capability_ids=fetch,
+            session_id="same-session", receipt_id="later-receipt", manifest_hash=HASH,
+            status="success", reason="native", route="native")
+    _append(path, harness="hermes", stage="discovery", outcome="selected", context_bytes=0,
+            capability_ids=fetch, session_id="no-receipt-session")
+    routes = summary([path])["invocation_routes"]
+    assert routes["successful_invokes"]["raw"]["native"] == 1
+    assert routes["selected_sessions"]["denominator"] == 1
+    assert routes["selected_sessions"]["without_invocation"] == 1
+    assert routes["uncorrelated_successful_invokes_raw"] == 1
+    assert routes["denominator"]["selected_discovery_events_without_receipt_id"] == 1

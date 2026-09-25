@@ -8,6 +8,13 @@ arguments, schemas, page ids, OAuth material, and exception text have no field.
 ``failure_class``, when present, is one fixed token and never exception text.
 An invoke row may set ``route`` to ``native``; success then uses reason ``native``
 instead of ``bridge_read``.
+
+``summary`` adds ``invocation_routes``. A successful invoke is ``bridge`` when
+``reason`` is ``bridge_read`` and ``route`` is absent, ``native`` when ``route``
+and ``reason`` are ``native``, and ``unknown`` otherwise. Selected sessions
+correlate only on an exact session id, receipt id, and capability id. ``exclude_session_ids``
+filters that section by exact session id and does not label the remainder
+organic. Repeat successes are reported raw and deduped; see ``ROUTE_DEDUPE_RULE``.
 """
 from __future__ import annotations
 
@@ -50,6 +57,40 @@ SELECTION_STATUSES = frozenset({"selected", "none", "fail_open"})
 INVOCATION_STATUSES = frozenset({"success", "denied"})
 # Invoke success is bridge_read unless route is native.
 INVOKE_SUCCESS_REASONS = frozenset({"bridge_read", "native"})
+_ROUTE_CLASSES = ("bridge", "native", "unknown")
+_ROUTE_PARTITIONS = (
+    "without_invocation",
+    "bridge",
+    "native",
+    "unknown",
+    "bridge+native",
+    "bridge+unknown",
+    "native+unknown",
+    "bridge+native+unknown",
+)
+_MAX_EXCLUDED_SESSIONS = 1000
+# Successful invoke rows collapse only when session, receipt, capability id, and
+# route class are all present and equal. Rows missing session_id or receipt_id
+# stay uncollapsed. Raw counts are always reported beside the collapsed counts.
+ROUTE_DEDUPE_RULE = (
+    "Successful invoke rows are counted raw and deduped. "
+    "A row collapses with others only when session_id, receipt_id, the one capability id, "
+    "and route class are all present and equal. "
+    "A row missing session_id or receipt_id stays uncollapsed. "
+    "Deduped counts are not unique tasks or users."
+)
+ROUTE_EXCLUSION_NOTE = (
+    "exclude_session_ids drops rows whose session_id is an exact caller-supplied string. "
+    "Only invocation_routes uses that filter. "
+    "Rows that remain are not labeled organic."
+)
+ROUTE_CORRELATION_NOTE = (
+    "A selected session is a discovery outcome selected with session_id and receipt_id. "
+    "It correlates to a successful invoke only when session_id, receipt_id, and capability id match. "
+    "Selected discovery events without either id stay outside the selected-session denominator. "
+    "Session and capability route counts are presence counts, so repeat invokes do not increase them."
+)
+ROUTE_INFERENCE = "remaining_rows_are_not_labeled_organic"
 # Provider-choice diagnostics. Tokens only; never exception text or secrets.
 FAILURE_CLASSES = frozenset({
     "missing_credential", "timeout", "transport", "provider",
@@ -121,10 +162,15 @@ def append_capability_event(path: Path | None, *, harness: str, stage: str, outc
 
 
 def summary(event_paths: list[Path], *, since_hours: float = 24, expected: list[str] | None = None,
-            now: datetime | None = None) -> dict:
-    """Aggregate accepted events. Selected ids and successful invokes stay separate."""
+            now: datetime | None = None, exclude_session_ids: list[str] | None = None) -> dict:
+    """Aggregate accepted events. Selected ids and successful invokes stay separate.
+
+    ``invocation_routes`` is the only field that uses ``exclude_session_ids``.
+    Other fields keep their previous meaning and ignore that argument.
+    """
     if isinstance(since_hours, bool) or not isinstance(since_hours, (int, float)) or since_hours < 0:
         raise ValueError("invalid_window")
+    excluded = _excluded_session_ids(exclude_session_ids)
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
         raise ValueError("invalid_window")
@@ -204,6 +250,7 @@ def summary(event_paths: list[Path], *, since_hours: float = 24, expected: list[
             "mcp_server writes one discovery row after capability choice and one invoke row for notion-fetch "
             "only when a manifest and events path are configured. capability_core does not emit these events."
         ),
+        "invocation_routes": _invocation_routes(accepted, excluded),
     }
 
 
@@ -391,6 +438,170 @@ def _now() -> str:
 
 def _iso(instant: datetime) -> str:
     return instant.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _excluded_session_ids(value: object) -> frozenset[str]:
+    if value is None:
+        return frozenset()
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple, set, frozenset)):
+        raise ValueError("invalid_excluded_session")
+    if len(value) > _MAX_EXCLUDED_SESSIONS:
+        raise ValueError("invalid_excluded_session")
+    found: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError("invalid_excluded_session")
+        found.add(item)
+    return frozenset(found)
+
+
+def _success_route(row: dict) -> str | None:
+    """Classify one accepted row. Only a successful invoke has a route class."""
+    if row.get("stage") != "invoke" or row.get("outcome") != "success":
+        return None
+    reason = row.get("reason")
+    route = row.get("route")
+    if route == "native" and reason == "native":
+        return "native"
+    if reason == "bridge_read" and route is None:
+        return "bridge"
+    return "unknown"
+
+
+def _partition_name(routes: set[str]) -> str:
+    if not routes:
+        return "without_invocation"
+    return "+".join(sorted(routes))
+
+
+def _fill_partition(counts: dict[str, int]) -> dict[str, int]:
+    return {key: counts.get(key, 0) for key in _ROUTE_PARTITIONS}
+
+
+def _route_presence(partition: dict[str, int]) -> dict[str, int]:
+    def has(token: str) -> int:
+        return sum(count for key, count in partition.items() if token in key.split("+"))
+
+    denominator = sum(partition.values())
+    return {
+        "with_bridge_success": has("bridge"),
+        "with_native_success": has("native"),
+        "with_unknown_success": has("unknown"),
+        "with_any_success": denominator - partition["without_invocation"],
+        "without_invocation": partition["without_invocation"],
+    }
+
+
+def _invocation_routes(rows: list[dict], excluded: frozenset[str]) -> dict:
+    """Count bridge, native, and unknown successes without copying event fields."""
+    kept: list[dict] = []
+    excluded_events = 0
+    for row in rows:
+        session_id = row.get("session_id")
+        if isinstance(session_id, str) and session_id in excluded:
+            excluded_events += 1
+            continue
+        kept.append(row)
+    selected_pairs: dict[tuple[str, str, str], set[str]] = {}
+    selected_without_session = 0
+    selected_without_receipt = 0
+    for row in kept:
+        if row.get("stage") != "discovery" or row.get("outcome") != "selected":
+            continue
+        session_id = row.get("session_id")
+        if not isinstance(session_id, str):
+            selected_without_session += 1
+            continue
+        receipt_id = row.get("receipt_id")
+        if not isinstance(receipt_id, str):
+            selected_without_receipt += 1
+            continue
+        for capability_id in row.get("capability_ids") or []:
+            selected_pairs.setdefault((session_id, receipt_id, capability_id), set())
+    raw = {name: 0 for name in _ROUTE_CLASSES}
+    collapsed: dict[str, set[tuple[str, str, str]]] = {name: set() for name in _ROUTE_CLASSES}
+    uncollapsed = {name: 0 for name in _ROUTE_CLASSES}
+    uncorrelated = 0
+    for row in kept:
+        route_name = _success_route(row)
+        if route_name is None:
+            continue
+        raw[route_name] += 1
+        session_id = row.get("session_id")
+        receipt_id = row.get("receipt_id")
+        capability_ids = row.get("capability_ids") or []
+        capability_id = capability_ids[0] if len(capability_ids) == 1 else ""
+        if isinstance(session_id, str) and isinstance(receipt_id, str) and capability_id:
+            collapsed[route_name].add((session_id, receipt_id, capability_id))
+        else:
+            uncollapsed[route_name] += 1
+        matched = (
+            isinstance(session_id, str)
+            and isinstance(receipt_id, str)
+            and bool(capability_id)
+            and (session_id, receipt_id, capability_id) in selected_pairs
+        )
+        if matched:
+            selected_pairs[(session_id, receipt_id, capability_id)].add(route_name)
+        else:
+            uncorrelated += 1
+    deduped = {name: len(collapsed[name]) + uncollapsed[name] for name in _ROUTE_CLASSES}
+    raw_total = sum(raw.values())
+    deduped_total = sum(deduped.values())
+    sessions: dict[str, set[str]] = {}
+    pair_counts: dict[str, int] = {}
+    for (session_id, _receipt_id, _capability_id), routes in selected_pairs.items():
+        sessions.setdefault(session_id, set()).update(routes)
+        name = _partition_name(routes)
+        pair_counts[name] = pair_counts.get(name, 0) + 1
+    session_counts: dict[str, int] = {}
+    for routes in sessions.values():
+        name = _partition_name(routes)
+        session_counts[name] = session_counts.get(name, 0) + 1
+    session_partition = _fill_partition(session_counts)
+    pair_partition = _fill_partition(pair_counts)
+    return {
+        "dedupe_rule": ROUTE_DEDUPE_RULE,
+        "exclusion_note": ROUTE_EXCLUSION_NOTE,
+        "correlation_note": ROUTE_CORRELATION_NOTE,
+        "inference": ROUTE_INFERENCE,
+        "excluded_session_id_count": len(excluded),
+        "excluded_events": excluded_events,
+        "denominator": {
+            "rows_after_exclusion": len(kept),
+            "successful_invokes_raw": raw_total,
+            "successful_invokes_deduped": deduped_total,
+            "selected_sessions": len(sessions),
+            "selected_session_capabilities": len(selected_pairs),
+            "selected_discovery_events_without_session_id": selected_without_session,
+            "selected_discovery_events_without_receipt_id": selected_without_receipt,
+        },
+        "successful_invokes": {
+            "raw": {
+                "bridge": raw["bridge"],
+                "native": raw["native"],
+                "unknown": raw["unknown"],
+                "total": raw_total,
+            },
+            "deduped": {
+                "bridge": deduped["bridge"],
+                "native": deduped["native"],
+                "unknown": deduped["unknown"],
+                "total": deduped_total,
+            },
+        },
+        "selected_sessions": {
+            "denominator": len(sessions),
+            **_route_presence(session_partition),
+            "partition": session_partition,
+        },
+        "selected_session_capabilities": {
+            "denominator": len(selected_pairs),
+            **_route_presence(pair_partition),
+            "partition": pair_partition,
+        },
+        "uncorrelated_successful_invokes_raw": uncorrelated,
+    }
 
 
 def _ids_where(rows: list[dict], stage: str, outcome: str) -> list[str]:

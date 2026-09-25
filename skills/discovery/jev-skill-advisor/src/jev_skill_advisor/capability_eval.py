@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import sys
+import uuid
 from pathlib import Path
 
 from .capability_choice import _protected, explicit_capability_ids, resolve_capabilities
@@ -269,7 +270,9 @@ def main(argv=None) -> int:
         return 2
     try:
         profile = resolve_profile(args.release_root, args.profile)
-        runtime = ServiceRuntime(profile, operation_id="capability-eval-live")
+        # The provider cap is per request. Reusing one ID across CLI runs would
+        # exhaust that window after several otherwise independent evaluations.
+        runtime = ServiceRuntime(profile, operation_id="capability-eval-" + uuid.uuid4().hex)
     except Exception as exc:
         print(json.dumps({"error": "live_runtime_unavailable", "type": type(exc).__name__}), file=sys.stderr)
         return 2
