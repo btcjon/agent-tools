@@ -7,12 +7,18 @@ Notion and a manifest path was passed in. It does not scan the skill catalog.
 The live wrapper is opt-in. When enabled, a Notion turn uses the session pin,
 the release's immutable capability manifest, and that profile's advisor
 service. Every other turn returns the skill context unchanged.
+
+A verified hint is remembered for that session. Hermes ``post_tool_call`` can
+then append one content-free native route event. The observer never reads tool
+arguments, results, or errors, and a telemetry failure does not change the tool
+result.
 """
 from __future__ import annotations
 
 import json
 import re
 import socket
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -62,7 +68,25 @@ _CONSTANTS = (
     f"RELEASE_ROOT = \"{INSTALLED_RELEASE_ROOT}\"\n"
     f"CAPABILITY_EVENTS = \"{INSTALLED_EVENTS_PATH}\"\n"
 )
-_IMPORT = "from .capability_hint import live_pre_model_context\n"
+_IMPORT = "from .capability_hint import live_pre_model_context, observe_post_tool_call\n"
+_OBSERVER_FN = (
+    "def _post_tool_call(**kwargs):\n"
+    "    observe_post_tool_call(kwargs, events_path=CAPABILITY_EVENTS, enabled=CAPABILITY_ENABLED)\n"
+    "    return None\n\n\n"
+)
+_REGISTER_DEF = "def register(ctx):\n"
+_REGISTER_HOOK = '    ctx.register_hook("pre_llm_call", _pre_llm_call)\n'
+_REGISTER_HOOKS = (
+    '    ctx.register_hook("pre_llm_call", _pre_llm_call)\n'
+    '    ctx.register_hook("post_tool_call", _post_tool_call)\n'
+)
+_NATIVE_TOOL = re.compile(r"^mcp__notion__notion_([A-Za-z0-9_]{1,80})$")
+_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,80}$")
+_SECRET_MARKERS = ("bearer", "oauth", "sk-", "secret", "password", "authorization", "api_key", "apikey")
+_HINTS = {}
+_HINTS_LOCK = threading.Lock()
+_HINT_TTL_S = 3600
+_HINT_LIMIT = 512
 
 
 def skill_context(selected):
@@ -352,6 +376,7 @@ def live_pre_model_context(
     the receipt binding. Failures, a missing manifest, and every non-Notion
     turn return the skill context with no further lookup.
     """
+    forget_verified_hint(session_id)
     selected = _selected(payload)
     base = _base(skill_context(selected))
     if enabled is not True:
@@ -395,6 +420,14 @@ def live_pre_model_context(
             return base
         if not recorded:
             return base
+    try:
+        remember_verified_hint(
+            session_id,
+            receipt_id=augmented.get("receipt_id") if isinstance(augmented, dict) else None,
+            manifest_hash=public.get("manifest_hash") if isinstance(public, dict) else None,
+        )
+    except Exception:
+        pass
     return augmented
 
 
@@ -444,21 +477,149 @@ def _notion_release_context(
     )
 
 
+def _safe_token(value):
+    if not isinstance(value, str) or not _TOKEN.fullmatch(value):
+        return None
+    if any(marker in value.lower() for marker in _SECRET_MARKERS):
+        return None
+    return value
+
+
+def remember_verified_hint(session_id, *, receipt_id, manifest_hash):
+    """Keep one same-process hint. Invalid tokens are ignored."""
+    session_id = _safe_token(session_id)
+    receipt_id = _safe_token(receipt_id)
+    if session_id is None or receipt_id is None:
+        return False
+    if not isinstance(manifest_hash, str) or not _HASH.fullmatch(manifest_hash):
+        return False
+    with _HINTS_LOCK:
+        now = time.monotonic()
+        for key, item in list(_HINTS.items()):
+            if now - item["seen_at"] > _HINT_TTL_S:
+                _HINTS.pop(key, None)
+        _HINTS[session_id] = {"receipt_id": receipt_id, "manifest_hash": manifest_hash, "seen_at": now}
+        while len(_HINTS) > _HINT_LIMIT:
+            oldest = next(iter(_HINTS))
+            _HINTS.pop(oldest, None)
+    return True
+
+
+def forget_verified_hint(session_id):
+    if not isinstance(session_id, str):
+        return
+    with _HINTS_LOCK:
+        _HINTS.pop(session_id, None)
+
+
+def clear_verified_hints():
+    with _HINTS_LOCK:
+        _HINTS.clear()
+
+
+def _tool_id(tool_name):
+    if not isinstance(tool_name, str):
+        return None
+    match = _NATIVE_TOOL.fullmatch(tool_name)
+    if match is None:
+        return None
+    identifier = "notion.mcp." + match.group(1).lower().replace("_", "-")
+    if not _CAPABILITY_ID.fullmatch(identifier):
+        return None
+    if any(marker in identifier for marker in _SECRET_MARKERS):
+        return None
+    return identifier
+
+
+def observe_post_tool_call(payload, *, events_path=None, enabled=False):
+    """Append one native Notion route event. Telemetry failures return False."""
+    try:
+        if enabled is not True or not isinstance(payload, dict):
+            return False
+        tool_id = _tool_id(payload.get("tool_name"))
+        session_id = _safe_token(payload.get("session_id"))
+        if tool_id is None or session_id is None:
+            return False
+        with _HINTS_LOCK:
+            stored = _HINTS.get(session_id)
+            if stored is None:
+                return False
+            if time.monotonic() - stored["seen_at"] > _HINT_TTL_S:
+                _HINTS.pop(session_id, None)
+                return False
+            receipt_id = stored["receipt_id"]
+            manifest_hash = stored["manifest_hash"]
+        status = payload.get("status")
+        if status in (None, "", "ok", "success"):
+            outcome, event_status, reason = "success", "success", "native"
+        else:
+            outcome, event_status, reason = "failed", "denied", "other"
+        duration = payload.get("duration_ms")
+        if isinstance(duration, bool) or not isinstance(duration, (int, float)):
+            latency = 0
+        elif 0 <= float(duration) <= 1_000_000_000:
+            latency = duration
+        else:
+            latency = 0
+        path = Path(events_path) if isinstance(events_path, str) else events_path
+        host = _session_host(None)
+        if not isinstance(host, str) or not re.fullmatch(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$", host):
+            host = None
+        return bool(append_capability_event(
+            path,
+            harness=HARNESS,
+            stage="invoke",
+            outcome=outcome,
+            latency_ms=latency,
+            capability_ids=[tool_id],
+            host=host,
+            receipt_id=receipt_id,
+            session_id=session_id,
+            manifest_hash=manifest_hash,
+            status=event_status,
+            reason=reason,
+            route="native",
+        ))
+    except Exception:
+        return False
+
+
 def plugin_patch(source):
-    """Return plugin source that calls this adapter. Does not touch disk or dest."""
-    if not isinstance(source, str) or source.count(SUCCESS_BRANCH) != 1:
+    """Return plugin source with pre-turn hint and post-tool observer.
+
+    Accept the original source or the already-installed pre-turn patch. This
+    function never writes to disk or to dest.
+    """
+    if not isinstance(source, str):
         raise ValueError("plugin_success_branch_missing")
     if "--capability-manifest" in source or "JEV_CAPABILITY_MANIFEST" in source:
         raise ValueError("selector_already_runs_capability_choice")
-    patched = source.replace(SUCCESS_BRANCH, _REPLACEMENT, 1)
+    if source.count(SUCCESS_BRANCH) == 1:
+        patched = source.replace(SUCCESS_BRANCH, _REPLACEMENT, 1)
+    elif source.count(_REPLACEMENT) == 1:
+        patched = source
+    else:
+        raise ValueError("plugin_success_branch_missing")
     if _IMPORT not in patched:
-        anchor = "from pathlib import Path\n"
-        if anchor not in patched:
-            raise ValueError("plugin_import_anchor_missing")
-        patched = patched.replace(anchor, anchor + "\n" + _IMPORT, 1)
+        old_import = "from .capability_hint import live_pre_model_context\n"
+        if old_import in patched:
+            patched = patched.replace(old_import, _IMPORT, 1)
+        else:
+            anchor = "from pathlib import Path\n"
+            if anchor not in patched:
+                raise ValueError("plugin_import_anchor_missing")
+            patched = patched.replace(anchor, anchor + "\n" + _IMPORT, 1)
     constants_anchor = 'NATIVE_SKILLS = HOME / ".hermes" / "skills"\n'
-    if "CAPABILITY_ENABLED = False\n" not in patched:
+    if not re.search(r"^CAPABILITY_ENABLED = (?:True|False)$", patched, re.MULTILINE):
         if constants_anchor not in patched:
             raise ValueError("plugin_constants_anchor_missing")
         patched = patched.replace(constants_anchor, constants_anchor + _CONSTANTS, 1)
+    if "def _post_tool_call(" not in patched:
+        if patched.count(_REGISTER_DEF) != 1:
+            raise ValueError("plugin_post_tool_anchor_missing")
+        patched = patched.replace(_REGISTER_DEF, _OBSERVER_FN + _REGISTER_DEF, 1)
+    if patched.count(_REGISTER_HOOK) != 1:
+        raise ValueError("plugin_post_tool_anchor_missing")
+    if 'ctx.register_hook("post_tool_call", _post_tool_call)' not in patched:
+        patched = patched.replace(_REGISTER_HOOK, _REGISTER_HOOKS, 1)
     return patched

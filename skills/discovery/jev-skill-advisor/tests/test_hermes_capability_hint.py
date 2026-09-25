@@ -27,6 +27,13 @@ hint = _load()
 
 
 @pytest.fixture(autouse=True)
+def _clear_verified_hints():
+    hint.clear_verified_hints()
+    yield
+    hint.clear_verified_hints()
+
+
+@pytest.fixture(autouse=True)
 def _no_full_selector(monkeypatch):
     def boom(*_args, **_kwargs):
         raise AssertionError("full selector ran")
@@ -282,6 +289,8 @@ def test_plugin_patch_keeps_selector_and_cache():
         "        _TURN[key] = result\n"
         "        return result\n"
         + hint.SUCCESS_BRANCH
+        + "\ndef register(ctx):\n"
+        + '    ctx.register_hook("pre_llm_call", _pre_llm_call)\n'
     )
     patched = hint.plugin_patch(fixture)
     compile(patched, "<plugin>", "exec")
@@ -295,11 +304,14 @@ def test_plugin_patch_keeps_selector_and_cache():
     assert "enabled=CAPABILITY_ENABLED" in patched
     assert "events_path=CAPABILITY_EVENTS" in patched
     assert f'CAPABILITY_EVENTS = "{hint.INSTALLED_EVENTS_PATH}"\n' in patched
-    assert "from .capability_hint import live_pre_model_context\n" in patched
+    assert "from .capability_hint import live_pre_model_context, observe_post_tool_call\n" in patched
+    assert 'ctx.register_hook("pre_llm_call", _pre_llm_call)\n' in patched
+    assert 'ctx.register_hook("post_tool_call", _post_tool_call)\n' in patched
+    assert "def _post_tool_call(**kwargs):\n" in patched
+    assert patched.count('ctx.register_hook("post_tool_call", _post_tool_call)') == 1
     assert "CAPABILITY_MANIFEST" not in patched
     assert "ADVISOR_SERVICE" not in patched
-    with pytest.raises(ValueError):
-        hint.plugin_patch(patched)
+    assert hint.plugin_patch(patched) == patched
 
 
 class _ReleaseStore:
@@ -495,3 +507,83 @@ def test_live_mismatch_and_failures_do_not_call_jev(tmp_path, monkeypatch):
     )
     assert no_host["capability_calls"] == 0
     assert evaluator.calls == []
+
+
+def test_native_observer_records_only_allowlisted_identity(tmp_path):
+    path = tmp_path / "events.jsonl"
+    secret = "Bearer private-page-argument"
+    assert hint.remember_verified_hint("session-1", receipt_id="receipt123", manifest_hash=HASH)
+    assert hint.observe_post_tool_call({
+        "tool_name": "mcp__notion__notion_fetch", "session_id": "session-1", "status": "success",
+        "duration_ms": 17.4, "args": {"id": secret}, "result": secret, "error_message": secret,
+    }, events_path=path, enabled=True)
+    row = json.loads(path.read_text().splitlines()[0])
+    assert row["route"] == "native"
+    assert row["capability_ids"] == ["notion.mcp.fetch"]
+    assert row["receipt_id"] == "receipt123"
+    assert row["session_id"] == "session-1"
+    assert row["manifest_hash"] == HASH
+    assert row["reason"] == "native"
+    assert secret not in path.read_text()
+    assert "args" not in row and "result" not in row and "error_message" not in row
+
+
+def test_native_observer_write_failure_and_missing_hint(tmp_path):
+    path = tmp_path / "events.jsonl"
+    assert not hint.observe_post_tool_call({
+        "tool_name": "mcp__notion__notion_fetch", "session_id": "session-1",
+    }, events_path=path, enabled=True)
+    assert hint.remember_verified_hint("session-1", receipt_id="receipt123", manifest_hash=HASH)
+    assert not hint.observe_post_tool_call({
+        "tool_name": "mcp__jev_skill_advisor__notion_fetch", "session_id": "session-1",
+    }, events_path=path, enabled=True)
+    assert not hint.observe_post_tool_call({
+        "tool_name": "mcp__notion__notion_fetch", "session_id": "session-2",
+    }, events_path=path, enabled=True)
+    assert hint.observe_post_tool_call({
+        "tool_name": "mcp__notion__notion_create_pages", "session_id": "session-1",
+        "status": "error", "error_message": "sk-secret", "duration_ms": 8,
+    }, events_path=path, enabled=True)
+    row = json.loads(path.read_text().splitlines()[0])
+    assert row["capability_ids"] == ["notion.mcp.create-pages"]
+    assert row["outcome"] == "failed" and row["reason"] == "other"
+    assert "sk-secret" not in path.read_text()
+    hint.forget_verified_hint("session-1")
+    assert not hint.observe_post_tool_call({
+        "tool_name": "mcp__notion__notion_fetch", "session_id": "session-1",
+    }, events_path=path, enabled=True)
+
+
+def test_native_observer_is_fail_open_and_hints_are_bounded(tmp_path, monkeypatch):
+    clock = {"now": 10.0}
+    monkeypatch.setattr(hint.time, "monotonic", lambda: clock["now"])
+    assert hint.remember_verified_hint("session-1", receipt_id="receipt123", manifest_hash=HASH)
+    assert not hint.observe_post_tool_call({
+        "tool_name": "mcp__notion__notion_fetch", "session_id": "session-1",
+    }, events_path=tmp_path / "missing" / "events.jsonl", enabled=False)
+    clock["now"] = 10.0 + hint._HINT_TTL_S + 1
+    assert not hint.observe_post_tool_call({
+        "tool_name": "mcp__notion__notion_fetch", "session_id": "session-1",
+    }, events_path=tmp_path / "events.jsonl", enabled=True)
+    assert not (tmp_path / "events.jsonl").exists()
+    for index in range(hint._HINT_LIMIT + 2):
+        assert hint.remember_verified_hint(f"session-{index}", receipt_id="receipt123", manifest_hash=HASH)
+    assert len(hint._HINTS) <= hint._HINT_LIMIT
+    assert "session-0" not in hint._HINTS
+
+
+def test_plugin_patch_upgrades_existing_live_preturn_patch():
+    fixture = (
+        "from pathlib import Path\n"
+        "from .capability_hint import live_pre_model_context\n"
+        'NATIVE_SKILLS = HOME / ".hermes" / "skills"\n'
+        "CAPABILITY_ENABLED = True\n"
+        + hint._REPLACEMENT
+        + "\ndef register(ctx):\n"
+        + '    ctx.register_hook("pre_llm_call", _pre_llm_call)\n'
+    )
+    patched = hint.plugin_patch(fixture)
+    assert "CAPABILITY_ENABLED = True" in patched
+    assert patched.count("CAPABILITY_ENABLED =") == 1
+    assert patched.count('ctx.register_hook("post_tool_call", _post_tool_call)') == 1
+    assert hint.plugin_patch(patched) == patched
