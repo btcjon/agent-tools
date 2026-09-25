@@ -28,9 +28,8 @@ export type BridgeReason =
 
 const PROTOCOL_VERSION = "2024-11-05";
 const MAX_LINE_BYTES = 1_000_000;
-// This adapter is copied into Pi's extension directory. Keep the implementation
-// root independent of import.meta.url and fail closed if this pinned path moves.
-const PACKAGE_ROOT = "/Users/jonbennett/Library/CloudStorage/Dropbox/Projects/agent-tools/skills/discovery/jev-skill-advisor";
+// This adapter is copied into Pi's extension directory. The runtime pointer is
+// host-local and independent of both that directory and the Dropbox checkout.
 
 interface PinnedTool {
   name: BridgeToolName;
@@ -159,12 +158,13 @@ export interface BridgePaths {
 
 export function defaultBridgePaths(): BridgePaths {
   const state = join(homedir(), ".local", "state", "jev-skill-advisor");
+  const runtime = join(state, "runtime", "current");
   return {
-    python: join(PACKAGE_ROOT, ".venv", "bin", "python"),
-    launcher: join(PACKAGE_ROOT, "adapters", "registration", "run_bridge.py"),
+    python: join(runtime, "bin", "python"),
+    launcher: join(runtime, "run_bridge.py"),
     credentialFile: join(state, "notion-cli", "credential.env"),
     workspaceFile: join(state, "notion-cli", "workspace.json"),
-    executable: join(PACKAGE_ROOT, ".venv", "bin", "skill-advisor-mcp"),
+    executable: join(runtime, "bin", "skill-advisor-mcp"),
     releaseRoot: join(state, "releases"),
     host: hostname(),
     eventsPath: join(state, "pi-adapter", "capability-events.jsonl"),
@@ -200,6 +200,8 @@ export function readReleasePointerFile(path: string): string | null {
 export function pinnedBridgeArgv(paths: BridgePaths, releaseId = PINNED_RELEASE_ID): string[] {
   return [
     paths.python,
+    "-I",
+    "-s",
     paths.launcher,
     "--credential-file",
     paths.credentialFile,

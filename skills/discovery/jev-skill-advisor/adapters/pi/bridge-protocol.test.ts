@@ -9,6 +9,7 @@ import {
   StdioBridge,
   bridgeLogLine,
   defaultBridgePaths,
+  pinnedBridgeArgv,
   pushLines,
   renderForwarded,
   schemaBytes,
@@ -84,9 +85,11 @@ test("the pinned bridge exposes exactly five known schemas", async () => {
   assert.equal(proc.killed, true);
 });
 
-test("an installed extension still launches the pinned package root", () => {
+test("an installed extension launches the host-local runtime pointer", () => {
   const paths = defaultBridgePaths();
-  assert.match(paths.launcher, /\/Projects\/agent-tools\/skills\/discovery\/jev-skill-advisor\/adapters\/registration\/run_bridge\.py$/);
+  assert.match(paths.launcher, /\/\.local\/state\/jev-skill-advisor\/runtime\/current\/run_bridge\.py$/);
+  assert.match(paths.executable, /\/runtime\/current\/bin\/skill-advisor-mcp$/);
+  assert.equal(pinnedBridgeArgv(paths).slice(1, 3).join(" "), "-I -s");
   assert.equal(paths.launcher.startsWith("/Users/jonbennett/.pi/"), false);
 });
 

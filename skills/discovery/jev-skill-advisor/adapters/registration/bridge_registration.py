@@ -606,6 +606,19 @@ def _base_report(harness, **fields):
     return report
 
 
+def inspect_runtime_entry(path, *, executable):
+    """Keep the configured path stable while checking its current target."""
+
+    if path is None:
+        raise RegistrationError("runtime_entry_missing")
+    path = Path(path).expanduser()
+    if not path.is_absolute() or not path.is_file():
+        raise RegistrationError("runtime_entry_invalid")
+    if executable and not os.access(path, os.X_OK):
+        raise RegistrationError("runtime_entry_invalid")
+    return str(path)
+
+
 def _config_text(path: Path):
     if not path.exists():
         return ""
@@ -617,7 +630,8 @@ def _config_text(path: Path):
 def assess(harness, *, release_root, config_path, executable, host, actual_host, events_path,
            route_log, expect_release=None, whoami_runner=None, discover_argv=None,
            expect_schema_digest=None, pi_client=None, expected_workspace_id=None,
-           credential_file=None, workspace_file=None, ntn_path=None, apply=False, disable=False):
+           credential_file=None, workspace_file=None, ntn_path=None, python_path=None,
+           launcher_path=None, apply=False, disable=False):
     if harness not in HARNESSES:
         return _base_report(harness, reason="unsupported_harness")
     report = _base_report(harness, config=None if config_path is None else str(config_path))
@@ -708,10 +722,14 @@ def assess(harness, *, release_root, config_path, executable, host, actual_host,
         report["reason"] = "identity_files_invalid"
         report["workspace"] = "unverified"
         return report
-    launcher = Path(__file__).with_name("run_bridge.py")
-    command = sys.executable
+    try:
+        launcher = inspect_runtime_entry(launcher_path or Path(__file__).with_name("run_bridge.py"), executable=False)
+        command = inspect_runtime_entry(python_path or sys.executable, executable=True)
+    except RegistrationError as exc:
+        report["reason"] = exc.code
+        return report
     args = [
-        str(launcher), "--credential-file", str(credential_file),
+        "-I", "-s", launcher, "--credential-file", str(credential_file),
         "--workspace-file", str(workspace_file),
         "--executable", binary["executable"], "--", *args,
     ]
@@ -781,6 +799,8 @@ def main(argv=None):
     parser.add_argument("--release-root", type=Path, default=default_release_root())
     parser.add_argument("--config", type=Path)
     parser.add_argument("--executable", type=Path, default=default_executable())
+    parser.add_argument("--python-path", type=Path)
+    parser.add_argument("--launcher-path", type=Path)
     parser.add_argument("--ntn-path", type=Path, default=default_ntn_path())
     parser.add_argument("--host", default=local_host())
     parser.add_argument("--expect-release")
@@ -793,6 +813,8 @@ def main(argv=None):
         release_root=args.release_root,
         config_path=config,
         executable=args.executable,
+        python_path=args.python_path,
+        launcher_path=args.launcher_path,
         ntn_path=args.ntn_path,
         host=args.host,
         actual_host=local_host(),

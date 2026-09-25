@@ -15,6 +15,8 @@ from bridge_registration import (
     disable_cursor,
     inspect_release,
     inspect_ntn,
+    inspect_runtime_entry,
+    assess,
     bridge_args,
     render_codex,
     render_cursor,
@@ -22,6 +24,46 @@ from bridge_registration import (
 
 
 class RegistrationRenderingTests(unittest.TestCase):
+    def test_runtime_entry_keeps_stable_symlink_path_and_rejects_missing(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "python-real"
+            target.write_text("#!/bin/sh\nexit 0\n")
+            target.chmod(0o700)
+            current = root / "current"
+            current.symlink_to(target)
+            self.assertEqual(inspect_runtime_entry(current, executable=True), str(current))
+            with self.assertRaises(RegistrationError) as raised:
+                inspect_runtime_entry(root / "missing", executable=True)
+            self.assertEqual(raised.exception.code, "runtime_entry_invalid")
+            with self.assertRaises(RegistrationError):
+                inspect_runtime_entry(Path("relative"), executable=False)
+
+    def test_assess_uses_explicit_host_local_runtime_paths(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            command = root / "python"
+            command.write_text("#!/bin/sh\n")
+            command.chmod(0o700)
+            launcher = root / "run_bridge.py"
+            launcher.write_text("# launcher\n")
+            with patch("bridge_registration.inspect_release", return_value={
+                "profile_harness": "codex", "release_prefix": "abc", "release_id": "a" * 64,
+            }), patch("bridge_registration.inspect_executable", return_value={
+                "portable_transport": "cli", "executable": str(root / "skill-advisor-mcp"),
+            }), patch("bridge_registration.inspect_ntn", return_value=str(root / "ntn")), \
+                patch("run_bridge.load_identity", return_value=("test-token", "workspace")), \
+                patch("bridge_registration.inspect_workspace", return_value="match"):
+                report = assess(
+                    "codex", release_root=root, config_path=None, executable=root / "skill-advisor-mcp",
+                    host="mac", actual_host="mac", events_path=root / "events", route_log=root / "routes",
+                    credential_file=root / "credential", workspace_file=root / "workspace",
+                    python_path=command, launcher_path=launcher,
+                )
+            self.assertEqual(report["status"], "ready")
+            self.assertEqual(report["command"], str(command))
+            self.assertEqual(report["args"][:3], ["-I", "-s", str(launcher)])
+
     def test_bridge_command_pins_release_and_absolute_ntn(self):
         args = bridge_args(Path("/tmp/release-root"), "a" * 64, "mac", "codex",
                            Path("/tmp/events"), Path("/tmp/routes"), Path("/opt/ntn"), "0.23.2")
