@@ -10,6 +10,8 @@ from jev_skill_advisor.capability_choice import (
     select_capabilities,
 )
 from jev_skill_advisor.capability_core import load_manifest, selection_cards
+from jev_skill_advisor.notion_host_transport import cli_capability_card
+from jev_skill_advisor.notion_mcp_transport import write_manifest
 from jev_skill_advisor.client import AdvisorError, validate_response
 
 ROOT_TASK = "file the weekly status where the team can find it"
@@ -48,6 +50,16 @@ class CapabilityChoiceTests(unittest.TestCase):
             self.manifest, task, context="", selected_skills=NOTION if selected is None else selected,
             evaluator=evaluator or fake,
         )
+
+    def test_cli_read_question_names_the_action_without_changing_mcp_questions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cli.json"
+            write_manifest(path, {"manifest_version": 1, "description": "CLI read test", "entries": [cli_capability_card()]})
+            cli = load_manifest(path)
+            payload = capability_choice_envelope(cli, "Read a Notion page by ID", "", NOTION)
+        self.assertIn("reading the contents of one Notion page by its ID", payload["questions"]["fit_0"]["instructions"])
+        mcp_payload = capability_choice_envelope(self.manifest, ROOT_TASK, "", NOTION)
+        self.assertIn("Notion operation", mcp_payload["questions"]["fit_0"]["instructions"])
 
     def test_semantic_choice_is_not_keyword_overlap(self):
         lexical = [card["id"] for card in selection_cards(self.manifest, ROOT_TASK)]

@@ -1,0 +1,22 @@
+[
+  {"task": "Read a Notion page by its ID and return the markdown.", "read": true},
+  {"task": "I have a Notion page ID. Fetch the page contents for me.", "read": true},
+  {"task": "Open this specific Notion page and inspect the body text.", "read": true},
+  {"task": "Retrieve the markdown of the Notion page identified by the supplied UUID.", "read": true},
+  {"task": "Check what a particular Notion page says before answering.", "read": true},
+  {"task": "Use the page ID to read the full Notion note, then summarize it.", "read": true},
+  {"task": "Fetch a single Notion page's content, not just its title.", "read": true},
+  {"task": "Verify the text in the Notion page referenced by this ID.", "read": true},
+  {"task": "Read the Notion page markdown and tell me whether it mentions the release gate.", "read": true},
+  {"task": "Load a known Notion page by UUID for a read-only review.", "read": true},
+  {"task": "Search Notion for pages about the rollout; I do not have a page ID.", "read": false},
+  {"task": "List the rows in a Notion data source.", "read": false},
+  {"task": "Change the title of a Notion page.", "read": false},
+  {"task": "Create a new Notion page with these notes.", "read": false},
+  {"task": "Delete the duplicate Notion page.", "read": false},
+  {"task": "Explain how Notion page IDs work without opening a page.", "read": false},
+  {"task": "Draft a plan for organizing Notion skills, but do not access Notion.", "read": false},
+  {"task": "Summarize the text I pasted here; no external lookup is needed.", "read": false},
+  {"task": "Find a Notion skill in the catalog, but do not read any Notion page.", "read": false},
+  {"task": "Add a comment to this Notion page.", "read": false}
+]

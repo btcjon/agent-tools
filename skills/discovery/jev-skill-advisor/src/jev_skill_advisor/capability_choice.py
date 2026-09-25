@@ -187,9 +187,14 @@ def _skill_cards(selected):
 def _questions(entries):
     questions = {}
     for index, entry in enumerate(entries):
+        instruction = (
+            "Is reading the contents of one Notion page by its ID required to fulfill the request?"
+            if entry.id == "notion.cli.page_read"
+            else f"Is the Notion operation {entry.operation} strictly needed for this request?"
+        )
         questions[f"fit_{index}"] = {
             "type": "noul",
-            "instructions": f"Is the Notion operation {entry.operation} strictly needed for this request?",
+            "instructions": instruction,
             "criteria": {"true": _FIT_TRUE, "false": _FIT_FALSE},
         }
     questions["write_intent"] = {
