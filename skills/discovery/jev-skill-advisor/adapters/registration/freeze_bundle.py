@@ -1,7 +1,9 @@
 """Build or verify a read-only, host-local Jev MCP runtime from a pinned commit.
 
 No checkout files or credentials enter the bundle. All dependency resolution is
-offline and checked against the archived uv.lock hashes.
+offline and checked against the archived uv.lock hashes. The launcher resolves
+the physical bundle before starting Python, and the manifest pins the external
+interpreter.
 """
 
 from __future__ import annotations
@@ -24,6 +26,32 @@ REVISION = "3fc6118"
 RELEASE = "a528d001220eec155f1172f3b9b76793177ae2479dd5d054ae246c047e2e26bc"
 BLOCKED_PATH_PARTS = ("CloudStorage", "Dropbox")
 SECRET_NAMES = {"credential.env", "workspace.json", ".env"}
+ENTRYPOINT = """#!/bin/sh
+physical=$(realpath "$0") || exit 1
+here=$(dirname "$physical") || exit 1
+exec "$here/python" -I -s -m jev_skill_advisor.mcp_server "$@"
+"""
+INTERPRETER_PROBE = """
+import pathlib, sys
+print(sys.version.replace("\\n", " "))
+major, minor = sys.version_info[:2]
+names = (
+    f"libpython{major}.{minor}.dylib",
+    f"libpython{major}.{minor}.so",
+    f"libpython{major}.{minor}.so.1.0",
+)
+root = pathlib.Path(sys.base_prefix)
+found = ""
+for directory in (root / "lib", root / "lib64", root):
+    for name in names:
+        candidate = directory / name
+        if candidate.is_file():
+            found = str(candidate.resolve())
+            break
+    if found:
+        break
+print("LIBPYTHON:" + found)
+"""
 
 
 class BundleError(Exception):
@@ -110,6 +138,76 @@ def entries(root: Path) -> dict[str, dict[str, str | int]]:
     return out
 
 
+def resolve_external_python(python: Path) -> Path:
+    if not python.is_absolute():
+        raise BundleError("python_invalid")
+    try:
+        resolved = Path(os.path.realpath(python))
+    except OSError:
+        raise BundleError("python_invalid") from None
+    if not resolved.is_file() or resolved.is_symlink() or any(
+        part in resolved.parts for part in BLOCKED_PATH_PARTS
+    ):
+        raise BundleError("python_invalid")
+    return resolved
+
+
+def interpreter_identity(python: Path) -> dict[str, str]:
+    """Pin the real interpreter file, not the venv symlink text."""
+    resolved = resolve_external_python(python)
+    try:
+        text = run([str(resolved), "-I", "-s", "-c", INTERPRETER_PROBE]).decode()
+    except BundleError:
+        raise BundleError("python_invalid") from None
+    lines = text.splitlines()
+    if len(lines) < 2 or not lines[-1].startswith("LIBPYTHON:"):
+        raise BundleError("python_invalid")
+    version = "\n".join(lines[:-1]).strip()
+    if not version:
+        raise BundleError("python_invalid")
+    record = {"path": str(resolved), "version": version, "sha256": digest(resolved)}
+    lib_text = lines[-1].removeprefix("LIBPYTHON:")
+    if lib_text:
+        lib = resolve_external_python(Path(lib_text))
+        record["libpython_path"] = str(lib)
+        record["libpython_sha256"] = digest(lib)
+    return record
+
+
+def check_base_python(python: Path, recorded: object) -> None:
+    if not isinstance(recorded, dict):
+        raise BundleError("python_unpinned")
+    for key in ("path", "version", "sha256"):
+        if not isinstance(recorded.get(key), str) or not recorded[key]:
+            raise BundleError("python_unpinned")
+    lib_path = recorded.get("libpython_path", None)
+    lib_hash = recorded.get("libpython_sha256", None)
+    if (lib_path is None) != (lib_hash is None) or (
+        lib_path is not None and (not isinstance(lib_path, str) or not isinstance(lib_hash, str) or not lib_path or not lib_hash)
+    ):
+        raise BundleError("python_unpinned")
+    allowed = {"path", "version", "sha256"}
+    if lib_path is not None:
+        allowed.update(("libpython_path", "libpython_sha256"))
+    if set(recorded) != allowed:
+        raise BundleError("python_unpinned")
+    try:
+        resolved = resolve_external_python(python)
+    except BundleError:
+        raise BundleError("python_mismatch") from None
+    if str(resolved) != recorded["path"] or digest(resolved) != recorded["sha256"]:
+        raise BundleError("python_mismatch")
+    if lib_path is not None:
+        try:
+            lib = resolve_external_python(Path(lib_path))
+        except BundleError:
+            raise BundleError("python_mismatch") from None
+        if str(lib) != lib_path or digest(lib) != lib_hash:
+            raise BundleError("python_mismatch")
+    if interpreter_identity(python) != recorded:
+        raise BundleError("python_mismatch")
+
+
 def verify(bundle: Path, *, require_readonly: bool = True) -> dict:
     if not bundle.is_dir() or bundle.is_symlink():
         raise BundleError("bundle_missing")
@@ -124,6 +222,7 @@ def verify(bundle: Path, *, require_readonly: bool = True) -> dict:
         raise BundleError("manifest_mismatch")
     if not (bundle / "bin" / "python").is_file() or not (bundle / "bin" / "skill-advisor-mcp").is_file():
         raise BundleError("entrypoint_missing")
+    check_base_python(bundle / "bin" / "python", manifest.get("base_python"))
     if require_readonly:
         for path in (bundle, *bundle.rglob("*")):
             if not path.is_symlink() and stat.S_IMODE(path.stat().st_mode) & 0o222:
@@ -177,22 +276,25 @@ def build(repo: Path, output_root: Path, *, revision: str, release: str, python:
             virtualenv_hook.unlink()
         shutil.copy2(source / "adapters" / "registration" / "run_bridge.py", bundle / "run_bridge.py")
         entrypoint = bundle / "bin" / "skill-advisor-mcp"
-        entrypoint.write_text(
-            '#!/bin/sh\nexec "$(dirname "$0")/python" -I -s -m jev_skill_advisor.mcp_server "$@"\n'
-        )
+        entrypoint.write_text(ENTRYPOINT)
         entrypoint.chmod(0o755)
         provenance = run(
             [str(bundle_python), "-I", "-s", "-c",
              "import jev_skill_advisor; print(jev_skill_advisor.__file__)"],
         ).decode().strip()
-        if not provenance.startswith(str(bundle)):
+        if not provenance.startswith((str(bundle), str(bundle.resolve()))):
             raise BundleError("import_provenance_invalid")
+        base_python = interpreter_identity(bundle_python)
+        requested = interpreter_identity(python)
+        if requested["path"] != base_python["path"] or requested["sha256"] != base_python["sha256"]:
+            raise BundleError("python_invalid")
         manifest = {
             "schema_version": 1,
             "source_revision": revision,
             "release_id": release,
             "lock_sha256": digest(source / "uv.lock"),
             "wheel_sha256": digest(built[0]),
+            "base_python": base_python,
             "files": entries(bundle),
         }
         (bundle / "bundle-manifest.json").write_text(json.dumps(manifest, sort_keys=True) + "\n")
