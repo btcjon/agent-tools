@@ -5,7 +5,7 @@
   "cards": [
     {
       "id": "notion.mcp.ai-search",
-      "summary": "Search Notion and connected sources such as Slack or Mail when AI search is available, including keywords. Not a fetch by URL and not a row query."
+      "summary": "Search Notion and connected sources for semantic where/how content questions or keywords when AI search is available. Not a fetch or row query."
     },
     {
       "id": "notion.mcp.check-mcp-next-steps",
@@ -129,7 +129,7 @@
     },
     {
       "id": "notion.mcp.search",
-      "summary": "Keyword or filtered Notion workspace search when you have no URL or ID. Prefer AI search for connected Slack or Mail. Not a fetch or row query."
+      "summary": "Use workspace search for Notion content by keyword or filter, including where/how questions without a URL or ID, if AI search is unavailable. Not a fetch."
     },
     {
       "id": "notion.mcp.search-agents",
@@ -141,7 +141,7 @@
     },
     {
       "id": "notion.mcp.search-skills",
-      "summary": "Find active Notion Skills by name or task. Returns skill metadata, not page bodies. Not a general workspace search."
+      "summary": "Find an active Notion Skill by name, purpose, or the reusable workflow a task needs. Returns skill metadata, not page bodies or general content."
     },
     {
       "id": "notion.mcp.send-message-to-session",
