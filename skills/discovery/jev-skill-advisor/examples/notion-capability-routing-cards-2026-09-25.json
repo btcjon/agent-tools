@@ -1,0 +1,187 @@
+{
+  "expected_source_hash": "2c7bc087503741cc43c28bc4cff479d3c083673627d2e03415e92e9e42cd9cac",
+  "description": "Curated one-line summaries from the captured 2026-09-24 Notion MCP manifest. Descriptions are curated from the captured manifest.",
+  "provenance": "Description curated from the captured 2026-09-24 Notion MCP manifest and current Notion MCP supported-tools docs.",
+  "cards": [
+    {
+      "id": "notion.mcp.ai-search",
+      "summary": "Search Notion and connected sources such as Slack or Mail when AI search is available, including keywords. Not a fetch by URL and not a row query."
+    },
+    {
+      "id": "notion.mcp.check-mcp-next-steps",
+      "summary": "Call at most once, and only when a fetch result asks for MCP next steps after the other calls finish. Not a search, fetch, or query."
+    },
+    {
+      "id": "notion.mcp.convert-page-to-skill",
+      "summary": "Mark an existing workspace page as a skill without changing its content. Not a skill search and not a page rewrite."
+    },
+    {
+      "id": "notion.mcp.create-attachment",
+      "summary": "Create one attachment from small UTF-8 text, a public HTTPS URL, or a finished upload. Not a local-file upload URL."
+    },
+    {
+      "id": "notion.mcp.create-comment",
+      "summary": "Add a comment to a page or a specific piece of its content. Does not read existing discussions."
+    },
+    {
+      "id": "notion.mcp.create-database",
+      "summary": "Create a database with SQL DDL or a typed tasks, projects, or skills schema. Not a page and not a view on an existing database."
+    },
+    {
+      "id": "notion.mcp.create-file-upload",
+      "summary": "Create a short-lived URL so one local file can be posted directly to Notion. Does not create the page or the comment."
+    },
+    {
+      "id": "notion.mcp.create-folder",
+      "summary": "Create an empty Folder under a page or inside another Folder. Does not add pages or files."
+    },
+    {
+      "id": "notion.mcp.create-pages",
+      "summary": "Create one or more Notion pages, with properties and content. Not an update of an existing page."
+    },
+    {
+      "id": "notion.mcp.create-view",
+      "summary": "Add a view, such as a board or calendar, to an existing database. Does not create the database or edit its rows."
+    },
+    {
+      "id": "notion.mcp.download-attachment",
+      "summary": "Read the UTF-8 text of a small attachment by the upload id from create-attachment. Not a page fetch and not a binary file."
+    },
+    {
+      "id": "notion.mcp.download-skill",
+      "summary": "Download one Skill page as a tar.gz of SKILL.md and its supporting files. Not a skill search and not a page body fetch."
+    },
+    {
+      "id": "notion.mcp.duplicate-page",
+      "summary": "Copy one page inside the current workspace. The copy finishes asynchronously. Does not move the original."
+    },
+    {
+      "id": "notion.mcp.fetch",
+      "summary": "Read one page, database, data source schema, or saved view settings by URL or ID. Not a row query and not a workspace search."
+    },
+    {
+      "id": "notion.mcp.get-async-task",
+      "summary": "Read the status of an async task started by another tool, such as a page copy. Does not start or change that task."
+    },
+    {
+      "id": "notion.mcp.get-comments",
+      "summary": "Read comments and discussions on a page, including resolved threads when asked. Does not add a comment."
+    },
+    {
+      "id": "notion.mcp.get-session-status",
+      "summary": "Read the latest turn status of a Custom Agent session without waiting. Does not start, stop, or message the session."
+    },
+    {
+      "id": "notion.mcp.get-teams",
+      "summary": "List workspace teamspaces with ids, names, and your membership. Not a page search and not a user directory."
+    },
+    {
+      "id": "notion.mcp.get-tool-access",
+      "summary": "Read this connection's tool availability, parameter restrictions, and upgrade links. Does not search, fetch, or change the workspace."
+    },
+    {
+      "id": "notion.mcp.get-users",
+      "summary": "List workspace members and guests, or the current user, with ids and emails. Not a content search."
+    },
+    {
+      "id": "notion.mcp.list-favorite-pages",
+      "summary": "List the current user's pinned or favorite pages and databases in sidebar order. Not a content search."
+    },
+    {
+      "id": "notion.mcp.list-private-pages",
+      "summary": "List top-level pages and databases in the Private sidebar only. Does not open their contents."
+    },
+    {
+      "id": "notion.mcp.list-recent-pages",
+      "summary": "List pages and databases the current user recently viewed, ranked by recency. Not a content search."
+    },
+    {
+      "id": "notion.mcp.list-session-events",
+      "summary": "List short summaries of saved events in one Custom Agent session. Not the full event body and not a page search."
+    },
+    {
+      "id": "notion.mcp.list-shared-pages",
+      "summary": "List pages and databases in the Shared sidebar only. Does not open their contents or search inside them."
+    },
+    {
+      "id": "notion.mcp.move-pages",
+      "summary": "Move one or more pages or databases to a new parent. Does not copy them or edit their content."
+    },
+    {
+      "id": "notion.mcp.query-data-sources",
+      "summary": "Read rows, run SQL, or return a saved view's rows for known data sources. Not a page-body fetch and not a workspace search."
+    },
+    {
+      "id": "notion.mcp.query-meeting-notes",
+      "summary": "Filter the current user's meeting-notes data source, including title keywords and action items. Not a general workspace search."
+    },
+    {
+      "id": "notion.mcp.query-multiple-data-sources",
+      "summary": "Run one read-only SQLite SQL query that combines multiple data sources. Not a page fetch and not a workspace content search."
+    },
+    {
+      "id": "notion.mcp.query-sessions",
+      "summary": "List Custom Agent sessions you can access, with title filter or sort. Not page search and not excerpt search of past sessions."
+    },
+    {
+      "id": "notion.mcp.read-session-event",
+      "summary": "Read the full visible content of one saved Custom Agent session event. Not a session list and not a Notion page fetch."
+    },
+    {
+      "id": "notion.mcp.search",
+      "summary": "Keyword or filtered Notion workspace search when you have no URL or ID. Prefer AI search for connected Slack or Mail. Not a fetch or row query."
+    },
+    {
+      "id": "notion.mcp.search-agents",
+      "summary": "Search Custom Agents by name or description, or browse favorites and newest agents. Not page search and not session search."
+    },
+    {
+      "id": "notion.mcp.search-sessions",
+      "summary": "Search past Custom Agent sessions by topic and return matching excerpts. Not a live session list and not Notion page search."
+    },
+    {
+      "id": "notion.mcp.search-skills",
+      "summary": "Find active Notion Skills by name or task. Returns skill metadata, not page bodies. Not a general workspace search."
+    },
+    {
+      "id": "notion.mcp.send-message-to-session",
+      "summary": "Send a follow-up message to a Custom Agent session you can access. Does not start a new session."
+    },
+    {
+      "id": "notion.mcp.show-advanced-analysis-next-steps",
+      "summary": "Call once with no arguments when multi-source SQL needs the full Notion MCP. Not itself a query or a search."
+    },
+    {
+      "id": "notion.mcp.spawn-session",
+      "summary": "Start a session with a published Custom Agent. Does not search past sessions or send a follow-up."
+    },
+    {
+      "id": "notion.mcp.stop-session",
+      "summary": "Stop a running Custom Agent session you can access. Does not delete the session or its events."
+    },
+    {
+      "id": "notion.mcp.update-data-source",
+      "summary": "Change a data source schema, title, or attributes with SQL DDL, such as adding a property. Not a row query or a page edit."
+    },
+    {
+      "id": "notion.mcp.update-folder",
+      "summary": "Update an existing Folder, including adding files by upload id. Not a page body edit."
+    },
+    {
+      "id": "notion.mcp.update-page",
+      "summary": "Update an existing page's properties or content. Not a new page and not a data-source schema change."
+    },
+    {
+      "id": "notion.mcp.update-view",
+      "summary": "Change a view's name, filters, sorts, or display. Does not edit database rows or the data-source schema."
+    },
+    {
+      "id": "notion.mcp.upload-skill",
+      "summary": "Import a Skill archive into a page in a Skills database. Not the flag that marks an existing page as a skill."
+    },
+    {
+      "id": "notion.mcp.wait-session",
+      "summary": "Wait until the latest turn in a Custom Agent session stops running. Does not send a message or start a session."
+    }
+  ]
+}
