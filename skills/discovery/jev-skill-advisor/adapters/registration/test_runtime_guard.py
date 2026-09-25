@@ -1,5 +1,7 @@
 import hashlib
 import json
+import shutil
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -10,6 +12,27 @@ from runtime_guard import GuardError, bind_release, check_python
 
 
 class RuntimeGuardTests(unittest.TestCase):
+    def test_copied_launcher_rejects_interpreter_mismatch_before_server_start(self):
+        with TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / "bundle"
+            (bundle / "bin").mkdir(parents=True)
+            (bundle / "bin" / "python").symlink_to(Path(sys.executable).resolve())
+            shutil.copy2(Path(__file__).with_name("runtime_guard.py"), bundle / "runtime_guard.py")
+            (bundle / "bundle-manifest.json").write_text(json.dumps({
+                "release_id": "a" * 64,
+                "base_python": {
+                    "path": str(Path(sys.executable).resolve()),
+                    "sha256": "0" * 64,
+                },
+            }))
+            result = subprocess.run(
+                [sys.executable, "-I", "-s", str(bundle / "runtime_guard.py")],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("python_mismatch", result.stderr)
+            self.assertNotIn("release_root_missing", result.stderr)
+
     def test_interpreter_hash_and_path_are_pinned(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

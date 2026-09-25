@@ -46,6 +46,16 @@ skill-search --select --task "<the task>" --json
 
 **Claude, Grok, and Agy.** Point their shared skill entry at the same `skill-discovery` package and the same command. Do not copy the library into each harness's private skills folder.
 
+## Discover an execution capability
+
+The host-local `jev-skill-advisor` MCP bridge is a second, optional surface beside pre-model skill injection. It offers five stable tools: `skill_suggest`, `skill_read`, `skill_report_outcome`, `capability_describe`, and `notion-fetch`. `skill_suggest` selects from compact capability cards after a skill match; `capability_describe` reveals only the chosen operation's live schema and checks its pinned hash. A selection is advice, not permission to execute. A stored, session-bound receipt is required for `notion-fetch`.
+
+Current bridge execution is **read-only Notion page fetch**, not general access to Notion's 45 native MCP tools. On Mac Codex, Cursor, and Pi, the preferred read route is the authenticated local `ntn` CLI. On dest Hermes, it is the existing Notion OAuth MCP connection. Search, database queries, edits, and attachments still use a separately available native/CLI route when supported; do not present `notion-fetch` as covering them. A fallback needs a concrete operation, auth, identity, or transport reason—not merely low Jev confidence. Neither the entire warehouse nor all 45 native schemas should be injected just to pick one capability.
+
+Host registration and rollback evidence is in [the Mac bundle note](../references/host-local-bundle-build-2026-09-25.md) and [the dest cutover note](../references/dest-host-local-cutover-2026-09-25.md). Those canaries prove a read and receipt denial in fresh sessions; they do not yet prove lower startup context or better downstream task results. Existing sessions may retain old tool registrations until safely refreshed.
+
+The bundle launch guard checks the pinned interpreter binary, a separate `libpython` when one is used, and the active release. It does not hash the host standard library or site-packages outside the frozen bundle; keep the host runtime patched and review those dependencies separately.
+
 ## What has been tested
 
 These are host checks, not a promise that cloning the repo turns delivery on.
@@ -55,7 +65,7 @@ These are host checks, not a promise that cloning the repo turns delivery on.
 - Codex injects the skill from its `UserPromptSubmit` hook. A silent post-tool repair used to hold the turn for the 10-minute Grok stall. The forwarder now ends that repair on a 90-second deadline. A tailnet check after that change injected the Tailscale skill, finished `tailscale status`, and returned a final answer.
 - Cursor. A user rule tells both the app and the `agent` CLI to run `skill-search --select` before other tools. A CLI run in a directory with no project rules called the selector. A new IDE chat has not been watched. An already-open chat keeps the instructions it started with. Each request may spend up to 160 provider calls. That window starts again on the next request. The lifetime total stays in the database as history and does not lock later requests out. A local window stop is `local_provider_attempt_budget`, not a provider failure.
 - The `skill-discovery` file reached through the old warehouse mount matches the snapshot copy. The selector reads the snapshot either way.
-- What is running on a host is not what a fresh clone contains. On the authoring machine, `skill-search` loads this package's working tree, and the Pi extension is a copy of `adapters/pi/skill-select.ts`. The Codex router change lives in the host router, outside this repo. Those files are not on GitHub until they are committed.
+- What is running on a host is not what a fresh clone contains. Check the active release and installed host-local bundle before claiming runtime parity. The Codex router lives outside this repo, and an already-open session may keep its old tool catalog.
 
 ## See whether a skill was injected
 

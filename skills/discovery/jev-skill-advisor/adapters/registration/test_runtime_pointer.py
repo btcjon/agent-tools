@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from runtime_pointer import PointerError, current_target, switch
+from runtime_pointer import PointerError, current_target, remove, switch
 
 
 class RuntimePointerTests(unittest.TestCase):
@@ -25,6 +25,11 @@ class RuntimePointerTests(unittest.TestCase):
             self.assertEqual(current_target(root), bundle)
             self.assertEqual(switch(root, shim, bundle)["status"], "switched")
             self.assertEqual(current_target(root), shim)
+            with self.assertRaisesRegex(PointerError, "current_mismatch"):
+                remove(root, bundle)
+            self.assertEqual(remove(root, shim)["status"], "removed")
+            self.assertIsNone(current_target(root))
+            self.assertTrue(shim.is_dir())
 
     def test_external_target_and_real_directory_are_refused(self):
         with TemporaryDirectory() as tmp, TemporaryDirectory() as outside:

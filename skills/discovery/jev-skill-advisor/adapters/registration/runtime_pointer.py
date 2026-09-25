@@ -87,9 +87,30 @@ def switch(root: Path, target: Path, expected: Path | None) -> dict:
                 "after": str(target)}
 
 
+def remove(root: Path, expected: Path) -> dict:
+    root = _safe_root(root)
+    expected = _safe_target(root, expected)
+    lock = root / ".pointer.lock"
+    with lock.open("a+b") as handle:
+        os.chmod(lock, 0o600)
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        before = current_target(root)
+        if before != expected:
+            raise PointerError("current_mismatch")
+        (root / "current").unlink()
+        dirfd = os.open(root, os.O_RDONLY)
+        try:
+            os.fsync(dirfd)
+        finally:
+            os.close(dirfd)
+        if current_target(root) is not None:
+            raise PointerError("post_remove_mismatch")
+        return {"status": "removed", "before": str(before), "after": None}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="jev-runtime-pointer")
-    parser.add_argument("action", choices=("check", "switch"))
+    parser.add_argument("action", choices=("check", "switch", "remove"))
     parser.add_argument("--runtime-root", type=Path, default=default_runtime_root())
     parser.add_argument("--target", type=Path)
     parser.add_argument("--expect-current", required=False)
@@ -100,6 +121,10 @@ def main(argv: list[str] | None = None) -> int:
             target = current_target(root)
             result = {"status": "present" if target else "absent",
                       "target": None if target is None else str(target)}
+        elif args.action == "remove":
+            if args.expect_current is None or args.expect_current == "absent":
+                raise PointerError("remove_inputs_missing")
+            result = remove(root, Path(args.expect_current))
         else:
             if args.target is None or args.expect_current is None:
                 raise PointerError("switch_inputs_missing")

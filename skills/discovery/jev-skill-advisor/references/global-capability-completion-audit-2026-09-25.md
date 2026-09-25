@@ -1,0 +1,16 @@
+# Jev + Notion global capability completion audit (2026-09-25)
+
+The intended end state is one canonical Notion skill library, selected through Jev and progressively disclosed to any supported harness without loading the warehouse or a large MCP schema catalog into the model's starting context. A selected skill can point to scripts, CLI/API operations, or MCP capabilities. One execution route should be primary for each host; a fallback needs a concrete reason. Graphify is not part of the live selector without a measured gain.
+
+| Requirement | Current evidence | Status / next proof |
+| --- | --- | --- |
+| Canonical global skills and integrity | Active Mac release `a528d001…` references Notion snapshot `f35e77ab…` with 627 skills, 616 eligible; immutable package/release and host-local bundle are pinned. | Fresh read and package checks passed; do not equate this with symlink retirement. |
+| Jev selection quality | Independent 40-case live capability holdout (`notion-capability-holdout-2-curated-uncached-2026-09-25.json`): top-1 1.0, acceptable recall .973, correct null 1.0, read-to-write false positives 0/27. | Selection test passed; downstream task quality still unmeasured. |
+| Mac Codex/Cursor/Pi | Five-tool bridge registered; Mac `ntn` read hash matched direct CLI, forged receipt denied. | Fresh registered-path canaries passed. Old Cursor MCP process still pre-cutover; fresh in-app adoption and context bytes need direct evidence. |
+| Dest Hermes | Five-tool bridge read via existing Notion OAuth MCP; native Notion still exposes 45 tools. | Fresh one-shot read and rollback passed. Old gateway child pre-cutover; test model-facing filter in a disposable profile before changing live exposure. |
+| Capability breadth | `skill_suggest` may return compact cards; `capability_describe` binds live schema; only `notion-fetch` executes through the bridge. | Search/query/write/attachments require a validated native or CLI path with typed unsupported/fallback reasons. Do not claim bridge parity. |
+| One preferred Notion method | Mac route is `ntn`; dest route is Notion MCP. Same-page markdown matched, but properties, file metadata, identity and other operations are not proven equivalent. | Operation/identity parity matrix and a primary-route rule; retain fallback where actually needed. |
+| Context and useful outcome | Initial five-tool schema count is known, but startup model-context bytes and paired task outcomes are not. `skill-advisor-usage` reports 55 direct deliveries in the last 24h with no follow-through labels. | Measure model-visible bytes/tokens separately from `tools/list` bytes; paired held-out tasks and independently reviewed use/quality labels before claiming a win. |
+| Safe release/retirement | Guarded bundles, pointer rollback and dest config reverse drill passed. Hermes registration now has a sidecar lock, source re-read and ten focused passing tests; the combined Python suite passed 448 tests. | Refresh old sessions safely; only retire redundant native exposure/symlinks after fresh-session parity, measured benefit, and rollback. |
+
+The current read-only pilot is functional. The full low-context, harness-agnostic result remains unproved until the rightmost checks are satisfied; neither a successful selector call nor a Notion fetch establishes the broader claim.
