@@ -8,7 +8,7 @@ from typing import Literal
 from .profile import load_profile
 from .service import SkillAdvisorService
 from .release import ReleaseError, ReleaseStore
-from . import capability_choice, capability_core, capability_observability, notion_mcp_transport
+from . import capability_choice, capability_core, capability_observability, notion_host_transport, notion_mcp_transport
 
 
 class _TelemetryClosed(Exception):
@@ -78,7 +78,13 @@ def _selection_fields(decision, manifest):
     return fields
 
 
-def _fetch_capability_id(manifest):
+def _fetch_capability_id(manifest, route=None):
+    if route == "cli":
+        entry = manifest.entries.get(notion_host_transport.CLI_CAPABILITY_ID)
+        if (entry is None or entry.writes or entry.operation != "notion-fetch"
+                or entry.server != notion_host_transport.CLI_SERVER):
+            return None
+        return entry.id
     matches = [
         entry.id for entry in manifest.entries.values()
         if entry.operation == "notion-fetch" and entry.writes is False
@@ -104,7 +110,8 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
                  host: str | None = None, harness: str | None = None,
                  capability_manifest: Path | None = None, list_tools=None,
                  capability_evaluator=None, notion_bridge=None,
-                 capability_events: Path | None = None):
+                 capability_events: Path | None = None, notion_route=None,
+                 route_log: Path | None = None, expected_release_id: str | None = None):
     try:
         from mcp.server import MCPServer
         from mcp.server.mcpserver.utilities.func_metadata import ArgModelBase
@@ -117,6 +124,9 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
         raise ValueError("release_root_rejects_static_manifest")
     static_service = SkillAdvisorService(load_profile(config)) if config else None
     store = ReleaseStore(release_root) if release_root else None
+    if expected_release_id is not None:
+        if store is None or store.current() != expected_release_id:
+            raise ReleaseError("current_release_changed")
     static_manifest = capability_core.load_manifest(capability_manifest) if capability_manifest else None
     # release_id -> (content_hash, manifest). Served only after a fresh hash check.
     manifest_cache: dict[str, tuple[str, object]] = {}
@@ -158,9 +168,13 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
         try:
             if not host or not harness:
                 raise ValueError("release_resolution_requires_host_and_harness")
+            if expected_release_id is not None and store._current_identity() != expected_release_id:
+                raise ReleaseError("current_release_changed")
             release_id, release_manifest, profile = store.resolve_profile(
                 host=host, harness=harness, session_id=session_id,
             )
+            if expected_release_id is not None and release_id != expected_release_id:
+                raise ReleaseError("current_release_changed")
             return SkillAdvisorService(profile), bound_manifest(release_id, release_manifest)
         except (ReleaseError, OSError, ValueError):
             raise _ReleaseDenied() from None
@@ -305,28 +319,62 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
                 service, manifest = binding_for(session_id)
             except _ReleaseDenied:
                 return release_denial()
+            if route_log is not None and notion_route is not None:
+                try:
+                    wrote = notion_host_transport.append_route_record(
+                        route_log,
+                        host=host if isinstance(host, str) else "",
+                        harness=harness if isinstance(harness, str) else "",
+                        route=notion_route.route,
+                        fallback_reason=notion_route.fallback_reason,
+                        executable=notion_route.executable,
+                    )
+                except (TypeError, ValueError, OSError):
+                    return {"status": "denied", "reason": "telemetry_failed"}
+                if not wrote:
+                    return {"status": "denied", "reason": "telemetry_failed"}
+            if notion_route is not None and not notion_route.executable:
+                return {"status": "denied", "reason": notion_route.denial_code or "call_unavailable"}
             if store is not None and manifest is None:
                 return {"status": "denied", "reason": "capability_unbound"}
             receipt = _stored_capability_receipt(service, session_id, receipt_id)
-            fetch_id = _fetch_capability_id(manifest)
+            route_name = notion_route.route if notion_route is not None else None
+            fetch_id = _fetch_capability_id(manifest, route_name)
+            obs = {
+                "capability_id": fetch_id if route_name == "cli" else None,
+                "credential": getattr(notion_bridge, "credential_source", None),
+                "workspace_match": None,
+                "body_sha256": None,
+                "body_bytes": None,
+                "result_code": "unauthorized_capability",
+                "ntn_version": None,
+            }
             started = time.perf_counter()
             reason_code = "unauthorized_capability"
             try:
                 if fetch_id is None:
                     reason_code = "missing_tool"
+                    obs["result_code"] = "missing_tool"
                     raise capability_core.CapabilityError("missing_tool")
                 if receipt is None:
+                    obs["result_code"] = "unauthorized_capability"
                     raise capability_core.CapabilityError("unauthorized_capability")
-                if list_tools is None:
+                if route_name != "cli" and list_tools is None:
                     reason_code = "describe_client_unconfigured"
                     raise capability_core.CapabilityError("describe_client_unconfigured")
-                outcome = notion_mcp_transport.read_bridge_call(
-                    manifest, receipt, page_id, list_tools=list_tools, call_tool=notion_bridge,
-                )
+                if route_name == "cli":
+                    outcome = notion_host_transport.read_cli_page(
+                        manifest, receipt, page_id, notion_bridge, obs=obs,
+                    )
+                else:
+                    outcome = notion_mcp_transport.read_bridge_call(
+                        manifest, receipt, page_id, list_tools=list_tools, call_tool=notion_bridge,
+                    )
                 succeeded = True
             except capability_core.CapabilityError as exc:
                 succeeded = False
                 reason_code = exc.code if isinstance(exc.code, str) else "other"
+                obs["result_code"] = reason_code
                 outcome = {"status": "denied", "reason": exc.code}
             latency_ms = (time.perf_counter() - started) * 1000
             try:
@@ -341,6 +389,25 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
                 )
             except _TelemetryClosed:
                 return {"status": "denied", "reason": "telemetry_failed"}
+            if route_name == "cli" and route_log is not None:
+                try:
+                    wrote = notion_host_transport.append_cli_read_record(
+                        route_log,
+                        host=host if isinstance(host, str) else "",
+                        harness=harness if isinstance(harness, str) else "",
+                        fallback_reason=notion_route.fallback_reason if notion_route is not None else None,
+                        capability_id=obs.get("capability_id"),
+                        credential=obs.get("credential") if obs.get("credential") in {"env", "saved"} else None,
+                        workspace_match=obs.get("workspace_match"),
+                        body_sha256=obs.get("body_sha256"),
+                        body_bytes=obs.get("body_bytes"),
+                        result_code=obs.get("result_code") or reason_code,
+                        ntn_version=obs.get("ntn_version"),
+                    )
+                except (TypeError, ValueError, OSError):
+                    return {"status": "denied", "reason": "telemetry_failed"}
+                if not wrote:
+                    return {"status": "denied", "reason": "telemetry_failed"}
             return outcome
     # capability_call stays a harness function. Do not register it as a model tool.
     return server
@@ -355,25 +422,50 @@ def parse_args(argv):
     parser.add_argument("--harness")
     parser.add_argument("--capability-manifest", type=Path)
     parser.add_argument("--capability-events", type=Path)
-    parser.add_argument("--notion-transport", choices=("hermes",))
+    parser.add_argument("--notion-transport", choices=("hermes", "cli"))
     parser.add_argument("--notion-server", default="notion")
+    parser.add_argument("--notion-fallback", choices=("mcp", "cli"))
+    parser.add_argument(
+        "--notion-fallback-reason",
+        choices=tuple(sorted(notion_host_transport.FALLBACK_REASONS)),
+    )
+    parser.add_argument("--notion-host-config", type=Path)
+    parser.add_argument("--route-log", type=Path)
+    parser.add_argument("--expected-release")
+    parser.add_argument("--notion-cli-path", type=Path)
+    parser.add_argument("--notion-cli-version")
     args = parser.parse_args(argv)
     if args.release_root is not None and args.capability_manifest is not None:
         parser.error("--capability-manifest cannot be combined with --release-root")
     if args.notion_transport and args.capability_manifest is None and args.release_root is None:
         parser.error("--notion-transport requires --capability-manifest")
+    if (args.notion_fallback is None) != (args.notion_fallback_reason is None):
+        parser.error("--notion-fallback and --notion-fallback-reason are both required")
+    preferred = {"hermes": "mcp", "cli": "cli"}.get(args.notion_transport)
+    if args.notion_fallback is not None and args.notion_transport is None:
+        parser.error("--notion-fallback requires --notion-transport")
+    if args.notion_fallback is not None and args.notion_fallback == preferred:
+        parser.error("--notion-fallback must name the other route")
+    if args.expected_release is not None and args.release_root is None:
+        parser.error("--expected-release requires --release-root")
+    if (args.notion_cli_path is None) != (args.notion_cli_version is None):
+        parser.error("--notion-cli-path and --notion-cli-version are both required")
+    if args.notion_transport == "cli" and args.notion_cli_path is None and args.release_root is not None:
+        parser.error("release CLI route requires a pinned ntn executable and version")
     return args
 
 
 def main(argv=None):
     args = parse_args(argv)
-    bridge = None
-    if args.notion_transport == "hermes":
-        bridge = notion_mcp_transport.HermesNotionTransport(server_name=args.notion_server)
+    bridge, decision = notion_host_transport.prepare_notion_runtime(args)
+    callable_bridge = bridge if decision is not None and decision.executable else None
+    registered_bridge = bridge if decision is not None else None
     build_server(
         args.config, release_root=args.release_root, host=args.host, harness=args.harness,
-        capability_manifest=args.capability_manifest, list_tools=bridge, notion_bridge=bridge,
-        capability_events=args.capability_events,
+        capability_manifest=args.capability_manifest, list_tools=callable_bridge,
+        notion_bridge=registered_bridge, capability_events=args.capability_events,
+        notion_route=decision, route_log=args.route_log,
+        expected_release_id=args.expected_release,
     ).run(transport="stdio")
     return 0
 
