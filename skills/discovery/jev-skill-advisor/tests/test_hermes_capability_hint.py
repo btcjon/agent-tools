@@ -295,7 +295,7 @@ def test_plugin_patch_keeps_selector_and_cache():
     assert "enabled=CAPABILITY_ENABLED" in patched
     assert "events_path=CAPABILITY_EVENTS" in patched
     assert f'CAPABILITY_EVENTS = "{hint.INSTALLED_EVENTS_PATH}"\n' in patched
-    assert "from capability_hint import live_pre_model_context\n" in patched
+    assert "from .capability_hint import live_pre_model_context\n" in patched
     assert "CAPABILITY_MANIFEST" not in patched
     assert "ADVISOR_SERVICE" not in patched
     with pytest.raises(ValueError):

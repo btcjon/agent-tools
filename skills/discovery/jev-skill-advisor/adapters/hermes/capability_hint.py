@@ -62,7 +62,7 @@ _CONSTANTS = (
     f"RELEASE_ROOT = \"{INSTALLED_RELEASE_ROOT}\"\n"
     f"CAPABILITY_EVENTS = \"{INSTALLED_EVENTS_PATH}\"\n"
 )
-_IMPORT = "from capability_hint import live_pre_model_context\n"
+_IMPORT = "from .capability_hint import live_pre_model_context\n"
 
 
 def skill_context(selected):
