@@ -12,6 +12,7 @@ import re
 import time
 
 from .capability_core import SELECTION_MAX_CAPABILITIES, CapabilityManifest
+from .capability_observability import FAILURE_CLASSES
 from .catalog_choice import MODEL
 from .client import validate_response
 
@@ -112,17 +113,56 @@ def _cards(manifest, ids):
     return cards
 
 
-def _result(manifest, ids, *, status, reason, budgets, decisions=None):
+def provider_failure_class(exc):
+    """Map a provider exception to a fixed token.
+
+    The token is the only thing callers may store. Exception text, paths,
+    and credentials are not returned.
+    """
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    if isinstance(exc, json.JSONDecodeError):
+        return "invalid_response"
+    raw = exc.args[0] if getattr(exc, "args", None) and isinstance(exc.args[0], str) else ""
+    if raw == "missing_api_key" or raw.startswith("cannot read selected env file"):
+        return "missing_credential"
+    if raw == "typesafe_timeout":
+        return "timeout"
+    if raw == "typesafe_transport_failure":
+        return "transport"
+    if raw.startswith("typesafe_http_") and raw[len("typesafe_http_"):].isdigit():
+        return "provider"
+    if raw in {
+        "typesafe_invalid_json",
+        "response is not an object",
+        "returned model does not match pinned model",
+        "response answer keys do not match request",
+        "missing input token usage",
+    } or raw.startswith(("invalid ", "missing probability", "probability ")):
+        return "invalid_response"
+    if raw in {"local_provider_attempt_budget", "evaluation_provider_attempt_budget", "provider_attempt_budget"}:
+        return "budget"
+    if isinstance(exc, OSError):
+        return "transport"
+    token = "other"
+    return token if token in FAILURE_CLASSES else "other"
+
+
+def _result(manifest, ids, *, status, reason, budgets, decisions=None, failure_class=None):
     identifier = manifest.content_hash if isinstance(manifest, CapabilityManifest) else ""
     evidence = {
         "manifest_hash": identifier, "ids": list(ids), "status": status, "reason": reason,
         "confidence_floor": CONFIDENCE_FLOOR, "budgets": budgets, "decisions": list(decisions or []),
     }
-    return {
+    result = {
         "status": status, "reason": reason, "ids": list(ids), "manifest_hash": identifier,
         "cards": _cards(manifest, ids) if isinstance(manifest, CapabilityManifest) else [],
         "evidence": evidence,
     }
+    if failure_class in FAILURE_CLASSES:
+        evidence["failure_class"] = failure_class
+        result["failure_class"] = failure_class
+    return result
 
 
 def _entries(manifest):
@@ -263,10 +303,11 @@ def select_capabilities(manifest, task, *, context="", selected_skills=(), evalu
     try:
         response = evaluator(payload, timeout)
         validate_response(response, payload["questions"], MODEL)
-    except Exception:
+    except Exception as exc:
         elapsed = (time.monotonic() - started) * 1000
         return _result(manifest, [], status="fail_open", reason="capability_choice_provider_failure",
-                       budgets=inspectable_budgets(state_bytes, wire_bytes, elapsed))
+                       budgets=inspectable_budgets(state_bytes, wire_bytes, elapsed),
+                       failure_class=provider_failure_class(exc))
     entries = _entries(manifest)
     decisions = []
     chosen = []

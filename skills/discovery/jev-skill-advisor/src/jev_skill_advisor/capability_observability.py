@@ -5,6 +5,9 @@ Callers record one JSONL row by passing a path. ``path=None`` writes nothing.
 row for notion-fetch only when a manifest and an events path are both set.
 Pass integers for context and schema sizes. Prompts, skill bodies, tool
 arguments, schemas, page ids, OAuth material, and exception text have no field.
+``failure_class``, when present, is one fixed token and never exception text.
+An invoke row may set ``route`` to ``native``; success then uses reason ``native``
+instead of ``bridge_read``.
 """
 from __future__ import annotations
 
@@ -45,6 +48,13 @@ SELECTION_REASONS = frozenset({
 })
 SELECTION_STATUSES = frozenset({"selected", "none", "fail_open"})
 INVOCATION_STATUSES = frozenset({"success", "denied"})
+# Invoke success is bridge_read unless route is native.
+INVOKE_SUCCESS_REASONS = frozenset({"bridge_read", "native"})
+# Provider-choice diagnostics. Tokens only; never exception text or secrets.
+FAILURE_CLASSES = frozenset({
+    "missing_credential", "timeout", "transport", "provider",
+    "invalid_response", "budget", "other",
+})
 # Known CapabilityError.code values. Anything else, including exception text, is "other".
 _CODE_REASONS = {
     "unauthorized_capability": "auth",
@@ -64,7 +74,7 @@ _CODE_REASONS = {
 }
 _OPTIONAL = (
     "receipt_id", "session_id", "context_bytes", "schema_bytes", "fallback_reason",
-    "manifest_hash", "status", "reason",
+    "manifest_hash", "status", "reason", "failure_class", "route",
 )
 _REQUIRED = ("host", "harness", "capability_ids", "stage", "outcome", "latency_ms")
 
@@ -88,7 +98,8 @@ def append_capability_event(path: Path | None, *, harness: str, stage: str, outc
                             session_id: str | None = None, context_bytes: int | None = None,
                             schema_bytes: int | None = None, fallback_reason: str | None = None,
                             manifest_hash: str | None = None, status: str | None = None,
-                            reason: str | None = None) -> bool:
+                            reason: str | None = None, failure_class: str | None = None,
+                            route: str | None = None) -> bool:
     """Append one allowlisted event. ``None`` path is the off switch."""
     if path is None:
         return False
@@ -98,7 +109,7 @@ def append_capability_event(path: Path | None, *, harness: str, stage: str, outc
                  capability_ids=capability_ids, host=host or _default_host(), receipt_id=receipt_id,
                  session_id=session_id, context_bytes=context_bytes, schema_bytes=schema_bytes,
                  fallback_reason=fallback_reason, manifest_hash=manifest_hash, status=status,
-                 reason=reason)
+                 reason=reason, failure_class=failure_class, route=route)
     event = {"event_schema": EVENT_SCHEMA, "event": EVENT_NAME, "timestamp": _now(), **body}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -200,7 +211,8 @@ def _body(*, harness: str, stage: str, outcome: str, latency_ms: int | float,
           capability_ids: list[str] | None, host: str, receipt_id: str | None,
           session_id: str | None, context_bytes: int | None, schema_bytes: int | None,
           fallback_reason: str | None, manifest_hash: str | None = None,
-          status: str | None = None, reason: str | None = None) -> dict:
+          status: str | None = None, reason: str | None = None,
+          failure_class: str | None = None, route: str | None = None) -> dict:
     if harness not in HARNESSES:
         raise ValueError("invalid_harness")
     if stage not in _OUTCOMES:
@@ -212,6 +224,8 @@ def _body(*, harness: str, stage: str, outcome: str, latency_ms: int | float,
             raise ValueError("invalid_fallback_reason")
     elif fallback_reason is not None:
         raise ValueError("invalid_fallback_reason")
+    if failure_class is not None and failure_class not in FAILURE_CLASSES:
+        raise ValueError("invalid_failure_class")
     if stage == "discovery" and context_bytes is None:
         raise ValueError("invalid_context_bytes")
     if stage == "describe" and schema_bytes is None:
@@ -230,9 +244,19 @@ def _body(*, harness: str, stage: str, outcome: str, latency_ms: int | float,
     _put(body, "schema_bytes", None if schema_bytes is None else _bytes(schema_bytes, "invalid_schema_bytes"))
     _put(body, "fallback_reason", fallback_reason)
     status, reason, manifest_hash = _bounded(stage, outcome, status, reason, manifest_hash)
+    if route is not None and route != "native":
+        raise ValueError("invalid_route")
+    if route == "native" and (stage != "invoke" or status not in INVOCATION_STATUSES):
+        raise ValueError("invalid_route")
+    if reason == "native" and route != "native":
+        raise ValueError("invalid_reason")
+    if route == "native" and status == "success" and reason != "native":
+        raise ValueError("invalid_reason")
     _put(body, "status", status)
     _put(body, "reason", reason)
     _put(body, "manifest_hash", manifest_hash)
+    _put(body, "failure_class", failure_class)
+    _put(body, "route", route)
     return body
 
 
@@ -252,6 +276,7 @@ def _accepted(raw: dict) -> dict | None:
             session_id=raw.get("session_id"), context_bytes=raw.get("context_bytes"),
             schema_bytes=raw.get("schema_bytes"), fallback_reason=raw.get("fallback_reason"),
             manifest_hash=raw.get("manifest_hash"), status=raw.get("status"), reason=raw.get("reason"),
+            failure_class=raw.get("failure_class"), route=raw.get("route"),
         )
     except ValueError:
         return None
@@ -302,7 +327,7 @@ def _bounded(stage: str, outcome: str, status: object, reason: object, manifest_
     elif stage == "invoke":
         if status not in INVOCATION_STATUSES:
             raise ValueError("invalid_status")
-        if status == "success" and (outcome != "success" or reason != "bridge_read"):
+        if status == "success" and (outcome != "success" or reason not in INVOKE_SUCCESS_REASONS):
             raise ValueError("invalid_reason")
         if status == "denied" and (outcome != "failed" or reason not in FALLBACK_REASONS):
             raise ValueError("invalid_reason")

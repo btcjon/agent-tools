@@ -333,8 +333,9 @@ class ReleaseManifestBindingTests(unittest.IsolatedAsyncioTestCase):
                 "protocol_version": 1, "session_id": "session-a", "receipt_id": pinned["receipt_id"],
                 "page_id": PAGE_ID,
             })
-            self.assertIn("_error", damaged)
+            self.assertEqual(damaged, {"status": "denied", "reason": "release_unavailable"})
             self.assertNotIn("synthetic-page", json.dumps(damaged))
+            self.assertNotIn(str(self.bound_a), json.dumps(damaged))
             self.assertEqual(len(self.bridge.calls), calls_before_denial)
             self.bound_a.write_bytes(self.original_a)
             self.schema["properties"]["id"]["type"] = "string"
@@ -353,8 +354,9 @@ class ReleaseManifestBindingTests(unittest.IsolatedAsyncioTestCase):
                 "protocol_version": 1, "session_id": "session-a", "receipt_id": pinned["receipt_id"],
                 "page_id": PAGE_ID,
             })
-            self.assertIn("_error", missing)
+            self.assertEqual(missing, {"status": "denied", "reason": "release_unavailable"})
             self.assertNotIn("synthetic-page", json.dumps(missing))
+            self.assertNotIn(str(self.bound_a), json.dumps(missing))
             ReleaseStore(self.release_root).activate(self.release_u, expected_previous=self.release_b)
             names = {tool.name for tool in (await client.list_tools()).tools}
             self.assertEqual(names, TOOLS)
@@ -398,6 +400,122 @@ class ReleaseManifestCliTests(unittest.TestCase):
         self.assertEqual(config.capability_manifest, Path("live.json"))
         with self.assertRaisesRegex(ValueError, "release_root_rejects_static_manifest"):
             build_server(release_root=Path("/releases"), capability_manifest=Path("/manifest.json"))
+
+
+def _denial_payloads(label):
+    session = f"s-{label}"
+    return [
+        ("skill_suggest", {
+            "protocol_version": 1, "request_id": session, "session_id": session,
+            "task": "please notion-fetch the page", "explicit_skills": ["notion"],
+        }),
+        ("skill_read", {
+            "protocol_version": 1, "session_id": session, "receipt_id": "receiptunused",
+            "skill_id": "warehouse:notion", "expected_content_hash": "0" * 64,
+        }),
+        ("skill_report_outcome", {
+            "protocol_version": 1, "session_id": session, "receipt_id": "receiptunused",
+            "event_id": "event-1", "skill_id": "warehouse:notion",
+            "outcome": "applied", "evidence": "self_reported",
+        }),
+        ("capability_describe", {
+            "protocol_version": 1, "session_id": session, "receipt_id": "receiptunused",
+            "capability_id": "notion.mcp.fetch",
+        }),
+        ("notion-fetch", {
+            "protocol_version": 1, "session_id": session, "receipt_id": "receiptunused",
+            "page_id": PAGE_ID,
+        }),
+    ]
+
+
+@unittest.skipIf(Client is None, "optional mcp dependency not installed")
+class ReleaseDenialTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addAsyncCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        spec = _snapshot(root)
+        self.release_root = root / "state"
+        source = root / "source.json"
+        write_manifest(source, _document("Read one Notion page by id.", "Release denial pins."))
+        self.release_id, manifest = build_release(
+            root=self.release_root, snapshot_id=spec["snapshot_id"], snapshot_root=spec["snapshot_root"],
+            evidence=spec["evidence"], revision=spec["revision"], activation="selection",
+            capability_manifest=source,
+        )
+        self.bound = Path(manifest["files"]["capability_manifest"]["path"])
+        self.original = self.bound.read_bytes()
+        self.events = root / "events.jsonl"
+        self.bridge = _Bridge(json.loads(json.dumps(FETCH_SCHEMA)))
+        self.provider_calls = []
+
+        def evaluator(payload, timeout):
+            self.provider_calls.append(timeout)
+            raise TimeoutError("typesafe_timeout")
+
+        self.server = build_server(
+            release_root=self.release_root, host=HOST, harness=HARNESS,
+            list_tools=self.bridge, notion_bridge=self.bridge, capability_events=self.events,
+            capability_evaluator=evaluator,
+        )
+        self.secrets = (
+            str(self.bound), str(self.release_root), "BODY_NOTION", PAGE_ID, "ReleaseError",
+            "release_file_tampered", "capability_manifest_missing", "no_current_release",
+            "Traceback", "typesafe_timeout",
+        )
+
+    def _body(self, result, name):
+        self.assertFalse(result.is_error, name)
+        body = _payload(result)
+        self.assertNotIn("_error", body, name)
+        return body
+
+    async def _assert_each_tool_denied(self, client, label):
+        for name, payload in _denial_payloads(label):
+            before = len(_events(self.events))
+            calls = len(self.bridge.calls)
+            lists = self.bridge.list_calls
+            providers = len(self.provider_calls)
+            body = self._body(await client.call_tool(name, payload), name)
+            self.assertEqual(body, {"status": "denied", "reason": "release_unavailable"}, name)
+            self.assertEqual(len(self.bridge.calls), calls, name)
+            self.assertEqual(self.bridge.list_calls, lists, name)
+            self.assertEqual(len(self.provider_calls), providers, name)
+            rows = _events(self.events)
+            self.assertEqual(len(rows), before + 1, name)
+            row = rows[-1]
+            self.assertEqual(row["stage"], "fallback", name)
+            self.assertEqual(row["outcome"], "failed", name)
+            self.assertEqual(row["fallback_reason"], "other", name)
+            self.assertEqual(row["capability_ids"], [], name)
+            self.assertEqual(row["harness"], HARNESS, name)
+            for hidden in ("session_id", "receipt_id", "manifest_hash", "failure_class", "reason", "status"):
+                self.assertNotIn(hidden, row, name)
+            blob = json.dumps({"body": body, "event": row})
+            for secret in self.secrets:
+                self.assertNotIn(secret, blob, name)
+
+    async def test_missing_and_tampered_release_denies_every_tool(self):
+        async with Client(self.server, raise_exceptions=True) as client:
+            names = {tool.name for tool in (await client.list_tools()).tools}
+            self.assertEqual(names, TOOLS)
+            await self._assert_each_tool_denied(client, "missing")
+            ReleaseStore(self.release_root).activate(self.release_id, expected_previous=None)
+            served = self._body(await client.call_tool("skill_suggest", {
+                "protocol_version": 1, "request_id": "served", "session_id": "served",
+                "task": "please notion-fetch the page", "explicit_skills": ["notion"],
+            }), "served")
+            self.assertEqual(served["status"], "explicit_selection")
+            self.assertNotEqual(served.get("reason"), "release_unavailable")
+            self.assertTrue(served.get("capabilities"))
+            self.assertEqual(self.provider_calls, [])
+            self.assertEqual(self.bridge.calls, [])
+            self.bound.write_bytes(b"damaged")
+            await self._assert_each_tool_denied(client, "tampered")
+            self.bound.write_bytes(self.original)
+            self.bound.unlink()
+            await self._assert_each_tool_denied(client, "removed")
 
 
 if __name__ == "__main__":

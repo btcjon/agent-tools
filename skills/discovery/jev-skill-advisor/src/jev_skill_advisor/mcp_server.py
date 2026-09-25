@@ -15,6 +15,10 @@ class _TelemetryClosed(Exception):
     """Telemetry was requested and did not record an allowlisted event."""
 
 
+class _ReleaseDenied(Exception):
+    """Release binding failed. The exception carries no path or cause."""
+
+
 def _bind_capabilities(decision):
     ids = list(decision["ids"])
     manifest_hash = decision["manifest_hash"]
@@ -59,7 +63,7 @@ def _selection_fields(decision, manifest):
     manifest_hash = decision.get("manifest_hash") if isinstance(decision, dict) else None
     if not isinstance(manifest_hash, str):
         manifest_hash = getattr(manifest, "content_hash", None)
-    return {
+    fields = {
         "stage": "discovery",
         "outcome": "selected" if status == "selected" else "absent",
         "capability_ids": ids,
@@ -68,6 +72,10 @@ def _selection_fields(decision, manifest):
         "status": status,
         "reason": reason,
     }
+    failure_class = decision.get("failure_class") if isinstance(decision, dict) else None
+    if failure_class in capability_observability.FAILURE_CLASSES:
+        fields["failure_class"] = failure_class
+    return fields
 
 
 def _fetch_capability_id(manifest):
@@ -132,7 +140,10 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
         path = Path(path_text)
         if path.is_symlink() or not path.is_file():
             raise ReleaseError("capability_manifest_missing")
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        try:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            raise ReleaseError("capability_manifest_invalid") from None
         if digest != recorded or loaded.content_hash != expected:
             raise ReleaseError("capability_manifest_invalid")
         cached = manifest_cache.get(release_id)
@@ -144,16 +155,37 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
     def binding_for(session_id):
         if static_service is not None:
             return static_service, static_manifest
-        if not host or not harness:
-            raise ValueError("release_resolution_requires_host_and_harness")
-        release_id, release_manifest, profile = store.resolve_profile(
-            host=host, harness=harness, session_id=session_id,
-        )
-        return SkillAdvisorService(profile), bound_manifest(release_id, release_manifest)
+        try:
+            if not host or not harness:
+                raise ValueError("release_resolution_requires_host_and_harness")
+            release_id, release_manifest, profile = store.resolve_profile(
+                host=host, harness=harness, session_id=session_id,
+            )
+            return SkillAdvisorService(profile), bound_manifest(release_id, release_manifest)
+        except (ReleaseError, OSError, ValueError):
+            raise _ReleaseDenied() from None
 
     def service_for(session_id):
         service, _bound = binding_for(session_id)
         return service
+
+    def release_denial():
+        """Stable denial. No path, exception text, skill body, or id."""
+        started = time.perf_counter()
+        try:
+            _emit(
+                capability_events,
+                harness=harness if isinstance(harness, str) else "",
+                host=host,
+                stage="fallback",
+                outcome="failed",
+                latency_ms=(time.perf_counter() - started) * 1000,
+                capability_ids=[],
+                fallback_reason="other",
+            )
+        except _TelemetryClosed:
+            pass
+        return {"status": "denied", "reason": "release_unavailable"}
     server = MCPServer("jev-skill-advisor")
 
     def evaluator_for(service):
@@ -171,7 +203,10 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
                  "task": task, "context": context, "explicit_skills": explicit_skills or []}
         if available_ids is not None:
             value["available_ids"] = available_ids
-        service, manifest = binding_for(session_id)
+        try:
+            service, manifest = binding_for(session_id)
+        except _ReleaseDenied:
+            return release_denial()
         response = service.suggest(value)
         if manifest is None or response.get("status") not in {"suggested", "explicit_selection", "complete"}:
             return response
@@ -217,7 +252,11 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
         value = {"protocol_version": protocol_version, "session_id": session_id,
                              "receipt_id": receipt_id, "skill_id": skill_id,
                              "expected_content_hash": expected_content_hash}
-        return service_for(session_id).read(value)
+        try:
+            service = service_for(session_id)
+        except _ReleaseDenied:
+            return release_denial()
+        return service.read(value)
 
     @server.tool()
     def skill_report_outcome(protocol_version: object, session_id: str, receipt_id: str, event_id: str,
@@ -226,7 +265,11 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
         value = {"protocol_version": protocol_version, "session_id": session_id,
             "receipt_id": receipt_id, "event_id": event_id, "skill_id": skill_id,
             "outcome": outcome, "evidence": evidence, "reason_code": reason_code}
-        return service_for(session_id).report_outcome(value)
+        try:
+            service = service_for(session_id)
+        except _ReleaseDenied:
+            return release_denial()
+        return service.report_outcome(value)
 
     if static_manifest is not None or store is not None:
         @server.tool()
@@ -235,7 +278,10 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
                 raise ValueError("invalid_protocol_version")
             if not all(isinstance(item, str) for item in (session_id, receipt_id, capability_id)):
                 raise ValueError("invalid_capability_request")
-            service, manifest = binding_for(session_id)
+            try:
+                service, manifest = binding_for(session_id)
+            except _ReleaseDenied:
+                return release_denial()
             if store is not None and manifest is None:
                 return {"status": "denied", "reason": "capability_unbound"}
             receipt = _stored_capability_receipt(service, session_id, receipt_id)
@@ -255,7 +301,10 @@ def build_server(config: Path | None = None, *, release_root: Path | None = None
                 raise ValueError("invalid_protocol_version")
             if not all(isinstance(item, str) for item in (session_id, receipt_id, page_id)):
                 raise ValueError("invalid_capability_request")
-            service, manifest = binding_for(session_id)
+            try:
+                service, manifest = binding_for(session_id)
+            except _ReleaseDenied:
+                return release_denial()
             if store is not None and manifest is None:
                 return {"status": "denied", "reason": "capability_unbound"}
             receipt = _stored_capability_receipt(service, session_id, receipt_id)

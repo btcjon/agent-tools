@@ -50,6 +50,29 @@ class McpServerTests(unittest.IsolatedAsyncioTestCase):
             invalid_version = await client.call_tool("skill_suggest", {**payload, "protocol_version": True})
             self.assertTrue(invalid_version.is_error)
 
+    async def test_static_config_does_not_use_release_denial(self):
+        async with Client(build_server(self.config), raise_exceptions=True) as client:
+            result = await client.call_tool("skill_suggest", {
+                "protocol_version": 1, "request_id": "static", "session_id": "s-static",
+                "task": "use alpha", "explicit_skills": ["alpha"],
+            })
+            self.assertFalse(result.is_error)
+            response = result.structured_content or json.loads(result.content[0].text)
+            response = response.get("result", response)
+            self.assertEqual(response["status"], "explicit_selection")
+            self.assertNotEqual(response.get("reason"), "release_unavailable")
+            card = response["selected"][0]
+            read = await client.call_tool("skill_read", {
+                "protocol_version": 1, "session_id": "s-static", "receipt_id": response["receipt_id"],
+                "skill_id": card["id"], "expected_content_hash": card["content_hash"],
+            })
+            self.assertFalse(read.is_error)
+            body = read.structured_content or json.loads(read.content[0].text)
+            body = body.get("result", body)
+            self.assertEqual(body["status"], "read")
+            self.assertIn("# Alpha", body["body"])
+            self.assertNotEqual(body.get("reason"), "release_unavailable")
+
     async def test_shadow_returns_no_selection_or_body(self):
         raw=json.loads(self.config.read_text()); raw["mode"]="shadow"; self.config.write_text(json.dumps(raw))
         async with Client(build_server(self.config), raise_exceptions=True) as client:

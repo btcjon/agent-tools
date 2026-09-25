@@ -10,7 +10,7 @@ from jev_skill_advisor.capability_choice import (
     select_capabilities,
 )
 from jev_skill_advisor.capability_core import load_manifest, selection_cards
-from jev_skill_advisor.client import validate_response
+from jev_skill_advisor.client import AdvisorError, validate_response
 
 ROOT_TASK = "file the weekly status where the team can find it"
 MANIFEST = Path(__file__).resolve().parents[1] / "examples" / "notion-mcp-capability-manifest.json"
@@ -283,6 +283,69 @@ class CapabilityChoiceTests(unittest.TestCase):
         self.assertEqual(empty["status"], "none")
         self.assertEqual(empty["reason"], "capability_choice_none")
         self.assertTrue(_fits(calls[1][0])[2])
+
+    def test_provider_failure_classes_omit_exception_text(self):
+        secret = "sk-live-SUPERSECRET"
+        cases = [
+            (AdvisorError("missing_api_key"), "missing_credential"),
+            (AdvisorError(f"cannot read selected env file: /Users/a/{secret}"), "missing_credential"),
+            (TimeoutError(f"timed out Bearer {secret}"), "timeout"),
+            (AdvisorError("typesafe_timeout"), "timeout"),
+            (AdvisorError("typesafe_transport_failure"), "transport"),
+            (OSError(f"connect failed {secret}"), "transport"),
+            (AdvisorError("typesafe_http_503"), "provider"),
+            (AdvisorError(f"typesafe_http_401 {secret}"), "other"),
+            (AdvisorError("typesafe_invalid_json"), "invalid_response"),
+            (AdvisorError("response is not an object"), "invalid_response"),
+            (json.JSONDecodeError(secret, secret, 0), "invalid_response"),
+            (AdvisorError("local_provider_attempt_budget"), "budget"),
+            (RuntimeError(f"TYPESAFE_API_KEY={secret}"), "other"),
+        ]
+        for exc, expected in cases:
+            calls = []
+
+            def explode(payload, timeout, exc=exc):
+                calls.append(1)
+                raise exc
+
+            result = select_capabilities(
+                self.manifest, ROOT_TASK, selected_skills=NOTION, evaluator=explode,
+            )
+            blob = json.dumps(result)
+            self.assertEqual(result["status"], "fail_open", expected)
+            self.assertEqual(result["reason"], "capability_choice_provider_failure", expected)
+            self.assertEqual(result["ids"], [], expected)
+            self.assertEqual(result["cards"], [], expected)
+            self.assertEqual(result["failure_class"], expected, type(exc).__name__)
+            self.assertEqual(result["evidence"]["failure_class"], expected)
+            self.assertEqual(calls, [1], expected)
+            self.assertNotIn(secret, blob)
+            self.assertNotIn("TYPESAFE_API_KEY", blob)
+            self.assertNotIn("Bearer", blob)
+            message = exc.args[0] if exc.args and isinstance(exc.args[0], str) else ""
+            if message and message != expected:
+                self.assertNotIn(message, blob, expected)
+        absent = resolve_capabilities(self.manifest, ROOT_TASK, selected_skills=NOTION, evaluator=None)
+        self.assertEqual(absent["reason"], "capability_choice_provider_failure")
+        self.assertNotIn("failure_class", absent)
+        self.assertNotIn("failure_class", absent["evidence"])
+        clean = self._select({"notion.mcp.fetch": "use"})
+        self.assertNotIn("failure_class", clean)
+
+    def test_invalid_provider_payload_is_one_call_and_fail_open(self):
+        calls = []
+
+        def bad(payload, timeout):
+            calls.append(payload)
+            return {"model": "not-the-pinned-model", "answers": {}, "usage": {"input_tokens": 1}}
+
+        result = select_capabilities(self.manifest, ROOT_TASK, selected_skills=NOTION, evaluator=bad)
+        blob = json.dumps(result)
+        self.assertEqual(calls, [calls[0]])
+        self.assertEqual(result["failure_class"], "invalid_response")
+        self.assertEqual(result["ids"], [])
+        self.assertNotIn("not-the-pinned-model", blob)
+        self.assertNotIn("returned model", blob)
 
 
 def _scale_manifest():
