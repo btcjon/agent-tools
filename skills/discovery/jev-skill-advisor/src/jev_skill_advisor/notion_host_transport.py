@@ -13,6 +13,7 @@ import json
 import os
 import re
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -296,7 +297,7 @@ def resolve_cli_identity(*, environ=None, credential_source=None, expected_works
     """Resolve one declared credential source and workspace. Mismatched inputs are refused."""
 
     environ = os.environ if environ is None else environ
-    if not isinstance(environ, dict):
+    if not isinstance(environ, Mapping):
         raise CapabilityError("unauthenticated")
     file_source, file_workspace = _configured_pair(environ, config_path)
     sources = [item for item in (credential_source, file_source, environ.get(CREDENTIAL_ENV)) if item is not None]
@@ -317,7 +318,7 @@ def resolve_cli_identity(*, environ=None, credential_source=None, expected_works
 def _require_declared_credential(credential_source, environ):
     if credential_source == "saved":
         return
-    if credential_source == "env" and isinstance(environ, dict) and _present(environ.get(TOKEN_ENV)):
+    if credential_source == "env" and isinstance(environ, Mapping) and _present(environ.get(TOKEN_ENV)):
         return
     raise CapabilityError("unauthenticated")
 

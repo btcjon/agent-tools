@@ -1,5 +1,6 @@
 """Fake-transport checks for the per-host read-only Notion route."""
 import json
+import os
 import subprocess
 import sys
 import unittest
@@ -31,6 +32,7 @@ from jev_skill_advisor.notion_host_transport import (
     parse_page_markdown,
     prepare_notion_runtime,
     read_cli_page,
+    resolve_cli_identity,
     resolve_host_route,
     validate_read_argv,
     verify_ntn_executable,
@@ -179,6 +181,16 @@ class RouteSelectionTests(unittest.TestCase):
 
 
 class CliTransportTests(unittest.TestCase):
+    def test_real_os_environ_mapping_is_accepted(self):
+        values = {"NOTION_API_TOKEN": "synthetic-test-value", "NOTION_CREDENTIAL_SOURCE": "env",
+                  "NOTION_EXPECTED_WORKSPACE_ID": PINNED_WORKSPACE_ID}
+        with patch.dict(os.environ, values, clear=True):
+            source, workspace = resolve_cli_identity()
+            self.assertEqual((source, workspace), ("env", PINNED_WORKSPACE_ID))
+            transport = CliNotionTransport(runner=Runner(), expected_workspace_id=workspace,
+                                            credential_source=source)
+            self.assertTrue(transport.probe()["identity_ok"])
+
     def test_host_manifest_offers_only_executable_cli_card(self):
         base = {"entries": [{"id": "notion.mcp.fetch", "server": "notion", "operation": "notion-fetch"},
                             {"id": "notion.mcp.update_page", "server": "notion", "operation": "notion-update-page"}]}
