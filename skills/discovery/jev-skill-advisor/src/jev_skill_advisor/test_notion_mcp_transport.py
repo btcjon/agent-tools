@@ -11,7 +11,7 @@ from jev_skill_advisor.capability_core import (
 )
 from jev_skill_advisor.mcp_server import build_server, parse_args
 from jev_skill_advisor.notion_mcp_transport import (
-    FETCH_OPERATION, SAMPLE_MANIFEST_NAME,
+    CONNECT_TIMEOUT_S, FETCH_OPERATION, FETCH_TIMEOUT_S, SAMPLE_MANIFEST_NAME, SCHEMA_TIMEOUT_S,
     HermesNotionTransport, body_candidates, body_sha256, build_manifest_document,
     markdown_body, read_bridge_call, write_manifest, writes_flag,
 )
@@ -36,6 +36,11 @@ def _tools():
 
 
 class ManifestTests(unittest.TestCase):
+    def test_hermes_read_timeouts_are_bounded(self):
+        self.assertLessEqual(CONNECT_TIMEOUT_S, 10)
+        self.assertLessEqual(SCHEMA_TIMEOUT_S, 10)
+        self.assertLessEqual(FETCH_TIMEOUT_S, 10)
+
     def test_compact_manifest_pins_hashes_and_write_flags(self):
         document = build_manifest_document(_tools(), source="examples/notion-mcp-live-manifest-2026-09-24.json")
         self.assertEqual(len(document["entries"]), 3)

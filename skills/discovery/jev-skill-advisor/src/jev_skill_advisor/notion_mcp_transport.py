@@ -19,6 +19,9 @@ import tempfile
 from pathlib import Path
 
 FETCH_OPERATION = "notion-fetch"
+CONNECT_TIMEOUT_S = 10
+SCHEMA_TIMEOUT_S = 10
+FETCH_TIMEOUT_S = 10
 SAMPLE_MANIFEST_NAME = "notion-mcp-capability-manifest.json"
 DEFAULT_DESCRIPTION = "Live Notion MCP pins from dest Hermes OAuth tools/list. Ids and one-line summaries only."
 DEFAULT_PROVENANCE = (
@@ -317,7 +320,7 @@ def connect_hermes(server_name="notion"):
     async def _open():
         return await _connect_server(server_name, config)
 
-    server = _run_on_mcp_loop(_open, timeout=60)
+    server = _run_on_mcp_loop(_open, timeout=CONNECT_TIMEOUT_S)
     tools = [plain_tool(tool) for tool in list(getattr(server, "_tools", []) or [])]
 
     def refresh():
@@ -327,7 +330,7 @@ def connect_hermes(server_name="notion"):
                 raise RuntimeError("session_unavailable")
             return await session.list_tools()
 
-        listed = _run_on_mcp_loop(_list, timeout=60)
+        listed = _run_on_mcp_loop(_list, timeout=SCHEMA_TIMEOUT_S)
         return [plain_tool(tool) for tool in list(getattr(listed, "tools", []) or [])]
 
     def call(operation, arguments):
@@ -337,7 +340,7 @@ def connect_hermes(server_name="notion"):
                 raise RuntimeError("session_unavailable")
             return await session.call_tool(operation, arguments=arguments)
 
-        return _result_plain(_run_on_mcp_loop(_call, timeout=60))
+        return _result_plain(_run_on_mcp_loop(_call, timeout=FETCH_TIMEOUT_S))
 
     def close():
         async def _close():
