@@ -121,6 +121,23 @@ def _transport(runner):
 
 
 class RouteSelectionTests(unittest.TestCase):
+    def test_shared_policy_discloses_one_route_for_all_three_outcomes(self):
+        cases = (
+            (dict(_READY), dict(_READY), "mcp", None, True),
+            (dict(_ABSENT), dict(_READY), "cli", "harness_missing", True),
+            (dict(_ABSENT), dict(_ABSENT), "cli", "harness_missing", False),
+        )
+        for mcp, cli, route, reason, executable in cases:
+            with self.subTest(route=route, executable=executable):
+                decision = resolve_host_route(
+                    preferred="mcp", probes=_probes(mcp=mcp, cli=cli),
+                    fallback_route="cli", fallback_reason="harness_missing",
+                )
+                self.assertEqual(decision.record(), {
+                    "route": route, "fallback_reason": reason, "executable": executable,
+                })
+                self.assertEqual(set(decision.record()), {"route", "fallback_reason", "executable"})
+
     def test_ready_preferred_route_does_not_use_the_other(self):
         decision = resolve_host_route(
             preferred="mcp",
@@ -163,6 +180,32 @@ class RouteSelectionTests(unittest.TestCase):
         self.assertEqual(decision.route, "mcp")
         self.assertIsNone(decision.fallback_reason)
         self.assertEqual(runner.argv, [])
+
+    def test_hermes_adapter_reaches_cli_fallback_or_denial_without_opening_mcp(self):
+        args = Namespace(
+            notion_transport="hermes", notion_server="notion", notion_fallback="cli",
+            notion_fallback_reason="harness_missing", notion_host_config=None,
+            notion_cli_path="/test/ntn", notion_cli_version="0.23.2",
+        )
+        runner = Runner()
+        with patch("jev_skill_advisor.notion_host_transport.verify_ntn_executable", return_value=Path("/test/ntn")):
+            bridge, decision = prepare_notion_runtime(
+                args, runner=runner, mcp_factory=lambda: self.fail("unexpected MCP open"),
+                mcp_installed=False, environ={
+                    "NOTION_API_TOKEN": "synthetic-test-value",
+                    "NOTION_CREDENTIAL_SOURCE": "env",
+                    "NOTION_EXPECTED_WORKSPACE_ID": PINNED_WORKSPACE_ID,
+                },
+            )
+            self.assertIsInstance(bridge, CliNotionTransport)
+            self.assertEqual(decision.record(), {"route": "cli", "fallback_reason": "harness_missing", "executable": True})
+            denied, unavailable = prepare_notion_runtime(
+                args, runner=runner, mcp_factory=lambda: self.fail("unexpected MCP open"),
+                mcp_installed=False, environ={},
+            )
+        self.assertEqual(unavailable.route, "cli")
+        self.assertFalse(unavailable.executable)
+        self.assertIsInstance(denied, DeniedTransport)
 
     def test_route_log_is_content_free(self):
         with TemporaryDirectory() as tmp:

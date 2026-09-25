@@ -93,6 +93,15 @@ test("an installed extension launches the host-local runtime pointer", () => {
   assert.equal(paths.launcher.startsWith("/Users/jonbennett/.pi/"), false);
 });
 
+test("Pi requests its available CLI route, never assumes Hermes MCP fallback", () => {
+  const argv = pinnedBridgeArgv(defaultBridgePaths());
+  const transport = argv.indexOf("--notion-transport");
+  assert.equal(argv[transport + 1], "cli");
+  assert.equal(argv.includes("--notion-fallback"), false);
+  assert.equal(argv.includes("--capability-manifest"), false);
+  assert.equal(argv.includes("--release-root"), true);
+});
+
 test("schema drift and extra tools fail before Pi registration", async () => {
   const changed = structuredClone(PINNED_TOOLS);
   changed[4].inputSchema.properties.page_id = { title: "Page Id", type: "number" };

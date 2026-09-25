@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -55,14 +55,15 @@ def test_attempt_and_label_allowlist_do_not_store_payload(tmp_path):
 
 
 def test_new_delivery_is_direct_but_legacy_failure_is_not(tmp_path):
+    now = datetime.now(timezone.utc)
     events = tmp_path / "codex-adapter" / "events.jsonl"
     events.parent.mkdir()
-    events.write_text(json.dumps({"timestamp": "2026-09-24T11:00:00Z", "host": "mac", "status": "fallback",
+    events.write_text(json.dumps({"timestamp": (now - timedelta(hours=1)).isoformat(), "host": "mac", "status": "fallback",
                                   "fallback_reason": "Exception", "stable_ids": ["warehouse:a"],
                                   "prompt": "SECRET PROMPT", "body": "SECRET BODY"}) + "\n")
     assert append_attempt(events, harness="codex", status="emitted", skill_ids=["warehouse:a"],
                           hashes={"warehouse:a": "abc"}, receipt_id="r1", host="mac")
-    report = summary([events], now=datetime.now(timezone.utc))
+    report = summary([events], now=now)
     assert report["evidence"]["delivered_direct"] == 1
     assert report["evidence"]["reported_followthrough_self_report"] == {"unreported": 1}
     assert report["sources"][0]["status_rates"] is None
