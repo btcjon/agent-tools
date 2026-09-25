@@ -1,16 +1,15 @@
 /**
  * Pi startup extension. Runs skill-search before the agent loop and injects
- * one verified skill, or nothing.
- *
- * Install: copy this file to ~/.pi/agent/extensions/skill-select.ts
- * and restart Pi.
+ * one verified skill, or nothing. After a selected capability, it registers
+ * the five pinned bridge tools for that turn. See adapters/pi/INTEGRATION.md.
  */
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { BridgeSession, defaultBridgeDeps, type BridgeDeps } from "./bridge-protocol.ts";
 
 const MARKERS = ["typesafe_api_key=", "jev_api=", "authorization: bearer", "-----begin "];
 let lastTask = "";
@@ -105,11 +104,21 @@ export function contentFreeCapabilityFields(capabilities: unknown, skillId: stri
   };
 }
 
-export default function skillSelect(pi: ExtensionAPI) {
-  pi.on("before_agent_start", async (event) => {
+export function createSkillSelect(deps: BridgeDeps = defaultBridgeDeps()) {
+  const session = new BridgeSession(deps);
+  return function skillSelect(pi: ExtensionAPI) {
+    pi.on("session_shutdown", () => {
+      session.close();
+    });
+    pi.on("before_agent_start", async (event) => {
     const text = typeof event.prompt === "string" ? event.prompt.trim() : "";
     const lowered = text.toLowerCase();
     if (!text || text === lastTask || text.length > 8000 || MARKERS.some((marker) => lowered.includes(marker))) {
+      try {
+        await session.sync(pi, false);
+      } catch {
+        // A skipped turn must not retain the previous turn's optional tools.
+      }
       return;
     }
     lastTask = text;
@@ -132,8 +141,15 @@ export default function skillSelect(pi: ExtensionAPI) {
     }
     const content = selected?.content;
     const delivered = !!selected && typeof content === "string" && !!content;
-    const hint = delivered ? formatCapabilityHint(capabilities, selected?.skill_id) : "";
-    const capabilityFields = delivered ? contentFreeCapabilityFields(capabilities, selected?.skill_id) : undefined;
+    const accepted = delivered ? acceptCapabilities(capabilities, selected?.skill_id) : null;
+    let bridgeActive = false;
+    try {
+      bridgeActive = (await session.sync(pi, accepted?.status === "selected")).active;
+    } catch {
+      // Tool exposure fails closed. The skill text can still be injected.
+    }
+    const hint = bridgeActive ? formatCapabilityHint(capabilities, selected?.skill_id) : "";
+    const capabilityFields = bridgeActive ? contentFreeCapabilityFields(capabilities, selected?.skill_id) : undefined;
     const status = delivered ? "emitted" : reason === "catalog_choice_none" ? "abstained" : "fallback";
     const dir = join(homedir(), ".local", "state", "jev-skill-advisor", "pi-adapter");
     const receiptId = randomUUID().replace(/-/g, "");
@@ -175,5 +191,8 @@ export default function skillSelect(pi: ExtensionAPI) {
         display: false,
       },
     };
-  });
+    });
+  };
 }
+
+export default createSkillSelect();
