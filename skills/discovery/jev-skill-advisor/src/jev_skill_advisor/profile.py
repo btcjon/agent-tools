@@ -54,14 +54,62 @@ class HostProfile:
                 continue
             if implicit_only:
                 implicit, policy_hash = current_policy(Path(entry.source), Path(self.package_roots[sid]))
-                head = Path(entry.source).read_text(encoding="utf-8", errors="replace")[:8000].lower()
-                protected = any(marker in (head + "\n" + entry.description.lower()) for marker in ("typesafe_api_key=", "jev_api=", "authorization: bearer", "-----begin "))
+                protected = bool(guard_hits(Path(entry.source).read_text(encoding="utf-8", errors="replace"), entry.description))
                 if not implicit or policy_hash != entry.policy_hash or protected:
                     continue
             if sid in self.runtime_missing:
                 continue
             entries.append(entry)
         return Registry(entries)
+
+
+# --- guard-narrow-20261115 (COS): the Bearer check fires only on a literal-looking token. ---
+_GUARD_STRICT = ("typesafe_api_key=", "jev_api=", "-----begin ")
+_GUARD_DESC = ("typesafe_api_key=", "jev_api=", "authorization: bearer", "-----begin ")
+_GUARD_BEARER = re.compile(r"""(?i)["']?authorization["']?\s*:\s*["']?\s*bearer\b[ \t]*["'`]?([^\s"'`]*)""")
+_GUARD_PREFIXES = ("sk-", "crsr_", "eyj", "ghp_", "xox")
+
+
+def _guard_literal(token):
+    token = token.strip(".,;:)]}*")
+    if not token:
+        return False
+    low = token.lower()
+    if low.startswith(_GUARD_PREFIXES):
+        return True
+    if token[0] in "$<{" or token.startswith("{{"):
+        return False
+    if re.fullmatch(r"[A-Z_]+", token):
+        return False
+    if re.match(r"your[_-]", low) or "..." in token or "<" in token or ">" in token:
+        return False
+    if re.fullmatch(r"x+", low.replace("-", "").replace("_", "")):
+        return False
+    return len(token) >= 16
+
+
+def guard_hits(body, description=""):
+    """Locations that keep a skill out of implicit selection: ("description", marker) or (line_no, marker).
+    Never returns the matched text. The description (sent to the judge) keeps the strict markers."""
+    hits = []
+    desc = (description or "").lower()
+    for marker in _GUARD_DESC:
+        if marker in desc:
+            hits.append(("description", marker.strip()))
+    lines = (body or "").splitlines()
+    for number, line in enumerate(lines, 1):
+        low = line.lower()
+        for marker in _GUARD_STRICT:
+            if marker in low:
+                hits.append((number, marker.strip()))
+        for match in _GUARD_BEARER.finditer(line):
+            token = match.group(1)
+            if token in ("", "\\") and line.rstrip().endswith("\\") and number < len(lines):
+                nxt = lines[number].strip().strip("\"'`")
+                token = nxt.split()[0] if nxt else ""
+            if _guard_literal(token):
+                hits.append((number, "authorization: bearer <literal>"))
+    return hits
 
 
 def _policy(source: Path):
