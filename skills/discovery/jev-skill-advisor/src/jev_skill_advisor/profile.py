@@ -8,12 +8,159 @@ from pathlib import Path
 import re
 import math
 import shutil
+import stat as statmod
 
 from .exposure import Capability, Registry
+from .library_cache import LibraryCacheError
 
 
 class ProfileError(ValueError):
     pass
+
+
+def _skills_tree_fingerprint(skills_path: Path) -> str:
+    """SHA-256 of sorted metadata records under skills/; never follows links."""
+    try:
+        st = os.lstat(skills_path)
+    except OSError as exc:
+        raise LibraryCacheError("invalid_snapshot") from exc
+    if statmod.S_ISLNK(st.st_mode) or not statmod.S_ISDIR(st.st_mode):
+        raise LibraryCacheError("invalid_snapshot")
+    records = []
+    stack = [(str(skills_path), "")]
+    while stack:
+        current, prefix = stack.pop()
+        try:
+            entries = list(os.scandir(current))
+        except OSError as exc:
+            raise LibraryCacheError("invalid_snapshot") from exc
+        for entry in entries:
+            if entry.is_symlink():
+                raise LibraryCacheError("snapshot_contains_link")
+            rel = f"{prefix}/{entry.name}" if prefix else entry.name
+            try:
+                is_dir = entry.is_dir(follow_symlinks=False)
+                is_file = entry.is_file(follow_symlinks=False)
+                info = entry.stat(follow_symlinks=False) if is_file else None
+            except OSError as exc:
+                raise LibraryCacheError("invalid_snapshot") from exc
+            if is_dir:
+                stack.append((entry.path, rel))
+            elif is_file:
+                records.append({
+                    "path": rel,
+                    "size": info.st_size,
+                    "mtime_ns": info.st_mtime_ns,
+                    "ctime_ns": info.st_ctime_ns,
+                    "ino": info.st_ino,
+                    "exec": bool(info.st_mode & 0o111),
+                })
+            else:
+                raise LibraryCacheError("snapshot_contains_special_file")
+    records.sort(key=lambda row: row["path"])
+    payload = json.dumps(records, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _read_manifest_sha256(path: Path) -> str:
+    manifest_path = path / "manifest.json"
+    try:
+        st = os.lstat(manifest_path)
+    except OSError as exc:
+        raise LibraryCacheError("invalid_snapshot") from exc
+    if statmod.S_ISLNK(st.st_mode) or not statmod.S_ISREG(st.st_mode):
+        raise LibraryCacheError("invalid_snapshot")
+    try:
+        data = Path(manifest_path).read_bytes()
+    except OSError as exc:
+        raise LibraryCacheError("invalid_snapshot") from exc
+    return hashlib.sha256(data).hexdigest()
+
+
+def _load_verify_marker(marker: Path, identity: str, manifest_sha256: str, tree_fingerprint: str):
+    """Return True when marker matches current values; otherwise treat as absent."""
+    try:
+        st = os.lstat(marker)
+    except OSError:
+        return False
+    if statmod.S_ISLNK(st.st_mode) or not statmod.S_ISREG(st.st_mode) or st.st_size > 4096:
+        return False
+    try:
+        raw = marker.read_bytes()
+        value = json.loads(raw)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    expected = {"version", "snapshot_id", "manifest_sha256", "tree_fingerprint"}
+    if not isinstance(value, dict) or set(value) != expected:
+        return False
+    if type(value.get("version")) is not int or value["version"] != 1:
+        return False
+    if not all(isinstance(value.get(key), str) for key in ("snapshot_id", "manifest_sha256", "tree_fingerprint")):
+        return False
+    return (
+        value["snapshot_id"] == identity
+        and value["manifest_sha256"] == manifest_sha256
+        and value["tree_fingerprint"] == tree_fingerprint
+    )
+
+
+def _write_verify_marker(state_dir: Path, identity: str, manifest_sha256: str, tree_fingerprint: str):
+    payload = json.dumps({
+        "version": 1,
+        "snapshot_id": identity,
+        "manifest_sha256": manifest_sha256,
+        "tree_fingerprint": tree_fingerprint,
+    }, separators=(",", ":"), sort_keys=True).encode()
+    marker = state_dir / "snapshot-verify.json"
+    tmp_name = f".snapshot-verify.{os.getpid()}.{os.urandom(4).hex()}.tmp"
+    tmp_path = state_dir / tmp_name
+    fd = None
+    try:
+        fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.write(fd, payload)
+        os.close(fd)
+        fd = None
+        os.replace(str(tmp_path), str(marker))
+    except OSError:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            os.unlink(str(tmp_path))
+        except OSError:
+            pass
+
+
+def _verify_snapshot_cached(cache, identity, state_dir):
+    """Verify a library snapshot once per release; reuse a local marker after that."""
+    if os.environ.get("JEV_SNAPSHOT_VERIFY_CACHE") == "0":
+        cache._verify(identity)
+        return
+
+    path = cache._snapshot_path(identity)
+    manifest_sha256 = _read_manifest_sha256(path)
+    tree_fingerprint = _skills_tree_fingerprint(path / "skills")
+
+    state_path = Path(state_dir)
+    try:
+        state_st = os.lstat(state_path)
+        state_is_dir = statmod.S_ISDIR(state_st.st_mode) and not statmod.S_ISLNK(state_st.st_mode)
+    except OSError:
+        state_is_dir = False
+
+    if state_is_dir and _load_verify_marker(
+        state_path / "snapshot-verify.json", identity, manifest_sha256, tree_fingerprint
+    ):
+        return
+
+    f1 = tree_fingerprint
+    cache._verify(identity)
+    manifest_sha256_after = _read_manifest_sha256(path)
+    f2 = _skills_tree_fingerprint(path / "skills")
+    if state_is_dir and f1 == f2 and manifest_sha256 == manifest_sha256_after:
+        _write_verify_marker(state_path, identity, manifest_sha256_after, f2)
 
 
 @dataclass(frozen=True)
@@ -173,8 +320,8 @@ def load_profile(path: Path) -> HostProfile:
     if not warehouse.is_dir() or not catalog_path.is_file():
         raise ProfileError("missing_warehouse_or_catalog")
     if warehouse.name == "skills" and re.fullmatch(r"[0-9a-f]{64}",warehouse.parent.name) and warehouse.parent.parent.name == "snapshots":
-        from .library_cache import LibraryCache, LibraryCacheError
-        try: LibraryCache(warehouse.parent.parent.parent)._verify(warehouse.parent.name)
+        from .library_cache import LibraryCache
+        try: _verify_snapshot_cached(LibraryCache(warehouse.parent.parent.parent), warehouse.parent.name, state)
         except LibraryCacheError as exc: raise ProfileError("invalid_library_snapshot") from exc
     control_root = next((parent for parent in (warehouse, *warehouse.parents) if parent.name == "AI-Control-Plane"), warehouse)
     if control_root == state or control_root in state.parents:
