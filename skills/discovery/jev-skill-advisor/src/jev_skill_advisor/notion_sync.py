@@ -563,6 +563,8 @@ def _execute_sync(inventory,plan,*,ledger,run_id=None,transport=None,limit=None,
                 properties={"Skill name":{"type":"title","title":[{"type":"text","text":{"content":name}}]},
                     "Description":{"type":"rich_text","rich_text":[{"type":"text","text":{"content":description}}]},
                     "Tags":{"type":"multi_select","multi_select":[{"name":row["plugin_tag"]}]},"Files":{"type":"files","files":uploads}}
+                if kind=="create":
+                    properties["Status"]={"type":"select","select":{"name":"Published"}}
                 if kind=="update":
                     observed=_observe(transport,action["page_id"]); intended_props=_property_fingerprint(properties)
                     intended_files=_attachment_fingerprint({"package-bundle.txt":bundle_data,"skill-package.json":manifest_data})
